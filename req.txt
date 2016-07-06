@@ -1,0 +1,3 @@
+1. gather all source files in a global variable
+2. add ${CMAKE_CURRENT_SOURCE_DIR}/ to file names
+3. just use $project

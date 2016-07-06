@@ -85,7 +85,6 @@ class Library:
         self.ttype = ""
         self.referred_name = name
 
-        # if there is $ in the name this is a dependant library, should be built only if some dependency was achieved
         if '$' in self.name:
             self.name = self.name.replace('$', '')
             self.name = self.name.replace('(', '')
@@ -647,7 +646,7 @@ def process_libraries():
         if generate_comments:
             current_content += "# Generating the library " + library.name + "\n"
         current_content += "set(project \"" + library.referred_name + "\")\n\n"
-        current_content += "set(${" + library.referred_name + "}_SOURCES, \"\")\n"
+        current_content += "set(${project}, \"\")\n"
         condition_required = ""
 
         # Here add the various conditional stuff for various files
@@ -674,10 +673,10 @@ def process_libraries():
                                     unfolded_conditionals = filelist_to_string(l, library.directory, 8)
 
                         if unfolded_conditionals:
-                            current_content += "    list(APPEND ${" + library.referred_name + "}_SOURCES" + unfolded_conditionals
+                            current_content += "    list(APPEND ${project}_SOURCES" + unfolded_conditionals
                             added_files.append(unfolded_conditionals)
                         else:
-                            current_content += "    list(APPEND ${" + library.referred_name + "}_SOURCES\n        " + "\n        ".join(conditional_append)
+                            current_content += "    list(APPEND ${project}_SOURCES\n        " + "\n        ".join(conditional_append)
                             added_files.append(conditional_append)
 
                         current_content += "\n    )\nendif()\n"
@@ -686,7 +685,7 @@ def process_libraries():
                     # We did not find this above, regardless generate an if() for it and a source of files
                     condition_required = cond
                     current_content += "\nif(" + cond + ")\n"
-                    current_content += "    list(APPEND ${" + library.referred_name + "}_SOURCES\n        " + "\n        ".join(conditional_append)
+                    current_content += "    list(APPEND ${project}_SOURCES\n        " + "\n        ".join(conditional_append)
                     current_content += "\n    )\nendif()\n"
 
             else:
@@ -701,7 +700,7 @@ def process_libraries():
                     else:
                         add_regardless.append(cond_append)
                 unfolded_conditionals += filelist_to_string(add_regardless, library.directory, 8)
-                current_content += "list(APPEND ${" + library.referred_name + "}_SOURCES" + unfolded_conditionals
+                current_content += "list(APPEND ${project}_SOURCES" + unfolded_conditionals
                 added_files.append(unfolded_conditionals)
                 current_content += "\n)\n"
 
@@ -715,7 +714,7 @@ def process_libraries():
                     condition_required = options[option].get_name()
                     # gather the list of files
                     filelist = filelist_to_string(library.filelist, library.directory)
-                    current_content += "    list(APPEND ${" + library.referred_name + "}_SOURCES\n    " + filelist + ")\nendif()\n\n"
+                    current_content += "    list(APPEND ${project}_SOURCES\n    " + filelist + ")\nendif()\n\n"
                     added_files.append(filelist)
                     condition_used = True
             if not condition_used:
@@ -727,14 +726,14 @@ def process_libraries():
                 condition_required = new_condition
                 # gather the list of files
                 filelist = filelist_to_string(library.filelist, library.directory)
-                current_content += "    list(APPEND ${" + library.referred_name + "}_SOURCES\n    " + filelist + ")\nendif()\n\n"
+                current_content += "    list(APPEND ${project}_SOURCES\n    " + filelist + ")\nendif()\n\n"
                 added_files.append(filelist)
 
         else:
             # gather the list of files
             filelist = filelist_to_string(library.filelist, library.directory)
             work_list = filelist.strip()
-            current_content += "list(APPEND ${" + library.referred_name + "}_SOURCES\n    " + work_list + "\n)\n"
+            current_content += "list(APPEND ${project}_SOURCES\n    " + work_list + "\n)\n"
             added_files.append(work_list)
 
         if library.condition:
@@ -746,9 +745,9 @@ def process_libraries():
         if library.target_type == TargetType.LIBRARY:
             # and now add some stuff to create a library out of the current stuff
             current_content += "add_library ( " +library.referred_name + \
-                               " " + library.type + " " +  "${${" + library.referred_name + "}_SOURCES} )\n"
+                               " " + library.type + " " +  "${${project}_SOURCES} )\n"
         else:
-            current_content += "add_executable(" + library.name + " ${${" + library.referred_name + "}_SOURCES} )\n"
+            current_content += "add_executable(" + library.name + " ${${project}_SOURCES} )\n"
 
         if not added_files:
             warning("No source files found for ", library.name )
@@ -774,7 +773,6 @@ def process_libraries():
 
 
         final_flags = []
-        # expand all the $ variables
         done = False
         while not done:
             for flag in to_work_with_flags:
@@ -783,7 +781,7 @@ def process_libraries():
                     if m:
                         desired_var = remove_garbage(m.group(0))
                         if desired_var == "top_srcdir":
-                            to_work_with_flags.append("{CMAKE_SOURCE_DIRECTORY}")
+                            to_work_with_flags.append("{CMAKE_SOURCE_DIR}")
                         elif desired_var in config_ac_variables:
                             for v in config_ac_variables[desired_var]["value"]:
                                 final_flags.append(v)
@@ -807,7 +805,7 @@ def process_libraries():
 
             for newflag in flags:
                 if newflag.strip().startswith("-I"):
-                    include_directories.append(newflag.replace("$(top_srcdir)", "${CMAKE_SOURCE_DIRECTORY}"))
+                    include_directories.append(newflag.replace("$(top_srcdir)", "${CMAKE_SOURCE_DIR}"))
 
         if include_directories:
             current_content += "\ntarget_include_directories( " + library.referred_name + " PRIVATE"
