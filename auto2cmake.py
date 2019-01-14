@@ -10,10 +10,19 @@ import sys, getopt, time, os, re
 from difflib import SequenceMatcher
 from enum import Enum
 import glob
+from os.path import join as pjoin
 
 ########################################################################################################################
 #                 Global variables used by the application, specified on command line                                  #
 ########################################################################################################################
+
+#
+# whether this is a quick conversion
+quick = False
+# whether the quick conversion is recursive or not
+recursive = False
+# whether the quick conversion generates a library or an executable
+quick_gen_lib = True
 
 # all the options should be upcase? -u switch
 upcase_identifiers = 1
@@ -44,6 +53,12 @@ config_ac_variables = {}
 extra_content = {}
 # The list of all the directories that will need a CMakeLists.txt in them
 required_directories = []
+
+########################################################################################################################
+# Constants
+########################################################################################################################
+cpp_extensions = [".c", ".cpp", ".cxx", ".c++", ".cc"]
+header_extensions = [".h", ".hpp", ".hxx", ".h++", ".hh"]
 
 ########################################################################################################################
 #                                       Classes used by the application                                                #
@@ -1065,10 +1080,102 @@ def process_cmake_file_directories():
         c_cmake_file = cmake_files[dirname]
         c_cmake_file.extra_content = extra_c
 
+
+########################################################################################################################
+# Creates a CMakeLists project file from the given parameters
+########################################################################################################################
+def create_cmakefile(path, cpps, headers, module, first_file):
+    f = open(pjoin(path,"CMakeLists.txt"), "w+")
+
+    f.write("cmake_minimum_required(VERSION 2.8)\n")
+    f.write("set (project " + module + ")\n\n")
+
+    if cpps:
+        f.write("set(${project}_SOURCES\n")
+        for fn in cpps:
+            f.write("    ${CMAKE_CURRENT_SOURCE_DIR}/" + fn + "\n")
+        f.write(")\n\n")
+
+    if headers:
+        f.write("set(${project}_HEADERS\n")
+        for fn in headers:
+            f.write("    ${CMAKE_CURRENT_SOURCE_DIR}/" + fn + "\n")
+        f.write(")\n")
+
+    f.close()
+
+########################################################################################################################
+# Converts a given directory to a CMake project
+########################################################################################################################
+def convert_sourcetree_to_cmake():
+    start_path = working_directory  # current directory
+    modules = []
+
+    first = True
+
+    for path, dirs, files in os.walk(start_path):
+
+        cpp_files = []
+        header_files = []
+
+        module = os.path.dirname(path).split('/')[-1]  ## directory of file
+
+        if ".git" in module:
+            continue
+
+        for filename in files:
+            full_name = os.path.join(path, filename)
+
+            fn, ext = os.path.splitext(full_name)
+            ext = ext.lower()
+            if ext in cpp_extensions:
+                cpp_files.append(filename)
+            if ext in header_extensions:
+                header_files.append(filename)
+
+        if cpp_files and header_files:
+            create_cmakefile(path, cpp_files, header_files, module, first)
+            first = False
+            modules.append(module)
+
+        # Now fix the cmake in the current directory to include the directories
+        f = open(pjoin(path,"CMakeLists.txt"), "a")
+
+        for module in dirs:
+            if ".git" in module:
+                continue
+            f.write("add_subdirectory(" + module + ")\n")
+
+        f.write("add_library(${project} STATIC ${${project}_SOURCES} ${${project}_HEADERS})\n")
+
+        f.write("target_link_libraries (${project}\n")
+
+        for module in dirs:
+            if ".git" in module:
+                continue
+            f.write("    " + module + "\n")
+
+        f.write(")\n")
+
+        if not recursive:
+            break
+
+
 ########################################################################################################################
 # converts the solution in the current directory
 ########################################################################################################################
 def convert():
+
+    global working_directory
+
+    # If this is a quick conversion mode:
+    # 1. Just gather the cpp files in the current directory
+    # 2. Create a CMakeLists.txt from them
+    if quick:
+        if not working_directory:
+            working_directory = os.getcwd()
+        convert_sourcetree_to_cmake()
+        exit()
 
     # first step: search for configure.ac
     configure_ac = find_file("configure.ac", working_directory)
@@ -1076,6 +1183,7 @@ def convert():
         process_configure_ac(configure_ac)
     else:
         warning(working_directory + "/configure.ac not found. Performing recursive source dump.")
+        convert_sourcetree_to_cmake()
         exit()
 
     # next step: write the options in a CMakeLists.txt for the gathered data
@@ -1194,17 +1302,23 @@ def convert():
 # Prints how to use the application
 ########################################################################################################################
 def usage():
-    print("auto2cmake.py -d <working_directory> [-e <exclude_directories>]")
+    print("auto2cmake.py -d <working_directory> [-e <exclude_directories>] [-q]")
     print("exclude_directories: separated by :")
+    print(" - q = quick mode, just convert the entire source tree in a CMake project file")
+    print(" - r = used in quick mode, do a recursive directory walking")
 
 ########################################################################################################################
 # main
 ########################################################################################################################
 def main(argv):
+
     global working_directory
     global exclude_directories
+    global quick
+    global recursive
+
     try:
-        opts, args = getopt.getopt(argv,"d:e:h",["directory=,exclude="])
+        opts, args = getopt.getopt(argv, "d:e:hqr", ["directory=,exclude="])
     except getopt.GetoptError:
         usage()
         sys.exit(2)
@@ -1215,8 +1329,14 @@ def main(argv):
             sys.exit()
         if opt == "-d":
             working_directory = arg
+            print("Start in:", working_directory)
         if opt == "-e":
             exclude_directories = arg.split(':')
+        if opt == "-q":
+            quick = True
+        if opt == "-r":
+            print("Recursive")
+            recursive = True
 
     convert()
 
