@@ -23,6 +23,8 @@ quick = False
 recursive = False
 # whether the quick conversion generates a library or an executable
 quick_gen_lib = True
+# whether to use CMakes AUTOMOC or manually generate the moc files
+cmake_automoc = False
 
 # all the options should be upcase? -u switch
 upcase_identifiers = 1
@@ -59,6 +61,7 @@ required_directories = []
 ########################################################################################################################
 cpp_extensions = [".c", ".cpp", ".cxx", ".c++", ".cc"]
 header_extensions = [".h", ".hpp", ".hxx", ".h++", ".hh"]
+qrc_extensions = [".qrc"]
 
 ########################################################################################################################
 #                                       Classes used by the application                                                #
@@ -1080,47 +1083,102 @@ def process_cmake_file_directories():
         c_cmake_file = cmake_files[dirname]
         c_cmake_file.extra_content = extra_c
 
+########################################################################################################################
+# Will check if the incoming header file is a MOC header or not. Just scan for a Q_OBJECT macro in it
+########################################################################################################################
+def moc_header(fn):
+    with open(fn) as search:
+        for line in search:
+            line = line.strip()  # remove '\n' at end of line
+            if "Q_OBJECT" == line:
+                print('  Checking if {} is moc:{}'.format(fn, True))
+                search.close()
+                return True
+    search.close()
+    print('  Checking if {} is moc:{}'.format(fn, False))
+    return False
 
 ########################################################################################################################
 # Creates a CMakeLists project file from the given parameters
 ########################################################################################################################
-def create_cmakefile(path, cpps, headers, module, first_file):
+def create_cmakefile(path, cpps, headers, module):
+
+    # This will return: (bool, bool, bool)
+    # Meaning: first bool: there were cpp files
+    #          second bool: there were header files
+    #          third bool: if set to process qt style moc headers and there were moc headers: true
+
+    cpps_found = False
+    headers_found = False
+    mocs_found = False
+
+    full_module = path[len(working_directory):]
+    if len(full_module) > 1 and full_module[0] == '/':
+        full_module = full_module[1:]
+        full_module = full_module.replace("/", "_")
+
     f = open(pjoin(path,"CMakeLists.txt"), "w+")
 
     f.write("cmake_minimum_required(VERSION 2.8)\n")
-    f.write("set (project " + module + ")\n\n")
+    if full_module:
+        f.write("set (project " + full_module + ")\n\n")
+    else:
+        f.write("set (project " + module + ")\n\n")
+        full_module = module
 
     if cpps:
+        cpps_found = True
         f.write("set(${project}_SOURCES\n")
         for fn in cpps:
             f.write("    ${CMAKE_CURRENT_SOURCE_DIR}/" + fn + "\n")
         f.write(")\n\n")
 
+    moc_headers = []
+
     if headers:
+        headers_found = True
         f.write("set(${project}_HEADERS\n")
         for fn in headers:
+            if not moc_header(pjoin(path,fn)):
+                f.write("    ${CMAKE_CURRENT_SOURCE_DIR}/" + fn + "\n")
+            else:
+                moc_headers.append(fn)
+        f.write(")\n\n")
+
+    if moc_headers:
+        mocs_found = True
+        f.write("set(${project}_MOC_HEADERS\n")
+        for fn in moc_headers:
             f.write("    ${CMAKE_CURRENT_SOURCE_DIR}/" + fn + "\n")
-        f.write(")\n")
+        f.write(")\n\n")
+
 
     f.close()
+
+    return cpps_found, headers_found, mocs_found, full_module
 
 ########################################################################################################################
 # Converts a given directory to a CMake project
 ########################################################################################################################
-def convert_sourcetree_to_cmake():
-    start_path = working_directory  # current directory
-    modules = []
+def convert_sourcetree_to_cmake(start_path):
 
-    first = True
+    print("Converting: {}".format(start_path))
+
+    if ".git" in start_path:
+        print("Not actually")
+        return ""
+
+    modules = []
 
     for path, dirs, files in os.walk(start_path):
 
         cpp_files = []
         header_files = []
+        resource_files = []
 
-        module = os.path.dirname(path).split('/')[-1]  ## directory of file
+        temp_module = os.path.basename(path)  # directory of file
 
-        if ".git" in module:
+        if ".git" in temp_module:
             continue
 
         for filename in files:
@@ -1132,34 +1190,78 @@ def convert_sourcetree_to_cmake():
                 cpp_files.append(filename)
             if ext in header_extensions:
                 header_files.append(filename)
+            if ext in qrc_extensions:
+                resource_files.append(filename)
 
-        if cpp_files and header_files:
-            create_cmakefile(path, cpp_files, header_files, module, first)
-            first = False
-            modules.append(module)
+        cpps_found, headers_found, mocs_found, used_module = create_cmakefile(path, cpp_files, header_files, temp_module)
 
         # Now fix the cmake in the current directory to include the directories
-        f = open(pjoin(path,"CMakeLists.txt"), "a")
+        f = open(pjoin(path, "CMakeLists.txt"), "a")
 
-        for module in dirs:
-            if ".git" in module:
-                continue
-            f.write("add_subdirectory(" + module + ")\n")
+        if recursive:
+            for cdir in dirs:
+                if ".git" in cdir:
+                    continue
+                f.write("add_subdirectory(" + cdir + ")\n")
+                sub_module = convert_sourcetree_to_cmake(pjoin(path, cdir))
+                if sub_module:
+                    modules.append(sub_module)
 
-        f.write("add_library(${project} STATIC ${${project}_SOURCES} ${${project}_HEADERS})\n")
+        # See the cmake automoc status
+        if mocs_found:
+            if not cmake_automoc:
+                f.write("qt_wrap_cpp(${project}_MOC_SOURCES ${${project}_MOC_HEADERS})\n")
+            else:
+                f.write("set(CMAKE_INCLUDE_CURRENT_DIR ON)\n")
+                f.write("set(CMAKE_AUTOMOC ON)\n")
 
-        f.write("target_link_libraries (${project}\n")
+        if cpps_found or headers_found or mocs_found:
+            f.write("add_library(${project} STATIC ")
+        if cpps_found:
+            f.write("${${project}_SOURCES} ")
+        if headers_found:
+            f.write("${${project}_HEADERS} ")
 
-        for module in dirs:
-            if ".git" in module:
-                continue
-            f.write("    " + module + "\n")
+        if mocs_found:
+            if not cmake_automoc:
+                f.write("${${project}_MOC_SOURCES} ")
+            else:
+                f.write("${${project}_MOC_HEADERS}")
 
-        f.write(")\n")
+        if cpps_found or headers_found or mocs_found:
+            f.write(")\n")
+
+        if modules:
+            f = open(pjoin(start_path, "CMakeLists.txt"), "a")
+
+            f.write("\ntarget_link_libraries (${project}\n")
+
+            for module in modules:
+                if ".git" in module:
+                    continue
+                f.write("    " + module + "\n")
+
+            f.write(")\n")
 
         if not recursive:
-            break
+            exit(0)
 
+    return used_module
+
+########################################################################################################################
+# Finds a list of files in the given directory
+########################################################################################################################
+def find_wildcard_file(fn, dir):
+    fs = glob.glob(dir + "/" + fn)
+    print(fs)
+    return fs
+
+########################################################################################################################
+# converts the qmake solution in the given directory
+########################################################################################################################
+def convert_qmake_project(dir, fn):
+    print("QMake project conversion coming shortly")
+    exit(2)
 
 ########################################################################################################################
 # converts the solution in the current directory
@@ -1174,7 +1276,7 @@ def convert():
     if quick:
         if not working_directory:
             working_directory = os.getcwd()
-        convert_sourcetree_to_cmake()
+        convert_sourcetree_to_cmake(working_directory)
         exit()
 
     # first step: search for configure.ac
@@ -1182,8 +1284,19 @@ def convert():
     if configure_ac:
         process_configure_ac(configure_ac)
     else:
-        warning(working_directory + "/configure.ac not found. Performing recursive source dump.")
-        convert_sourcetree_to_cmake()
+
+        qmake_pro = find_wildcard_file("*.pro", working_directory)
+        if qmake_pro:
+            for current_qmake_pro in qmake_pro:
+                convert_qmake_project(working_directory, current_qmake_pro)
+            exit()
+
+        if recursive:
+            msg_rec = ""
+        else:
+            msg_rec = "non "
+        warning(working_directory + "/configure.ac not found. Performing " + msg_rec + "recursive source dump in: " + working_directory)
+        convert_sourcetree_to_cmake(working_directory)
         exit()
 
     # next step: write the options in a CMakeLists.txt for the gathered data
@@ -1302,10 +1415,14 @@ def convert():
 # Prints how to use the application
 ########################################################################################################################
 def usage():
-    print("auto2cmake.py -d <working_directory> [-e <exclude_directories>] [-q]")
-    print("exclude_directories: separated by :")
-    print(" - q = quick mode, just convert the entire source tree in a CMake project file")
+    print("auto2cmake - a tool to convert autotools/qmake projects to cmake\n")
+    print("Usage: auto2cmake.py -d <working_directory> [-e <exclude_directories>] [-q] [-r] [-a] [-h]\n")
+    print("Specify exclude_directories: separated by ':'")
+    print("\nOther parameters:")
+    print(" - q = quick mode, just convert the entire directory into a CMake project file. Ignores both automake\n"
+          "       and qmake project files in the directory")
     print(" - r = used in quick mode, do a recursive directory walking")
+    print(" - a = used in quick mode, use CMake automoc set to true instead of manual qt source wrapping")
 
 ########################################################################################################################
 # main
@@ -1316,9 +1433,10 @@ def main(argv):
     global exclude_directories
     global quick
     global recursive
+    global cmake_automoc
 
     try:
-        opts, args = getopt.getopt(argv, "d:e:hqr", ["directory=,exclude="])
+        opts, args = getopt.getopt(argv, "d:e:hqra", ["directory=,exclude="])
     except getopt.GetoptError:
         usage()
         sys.exit(2)
@@ -1329,14 +1447,15 @@ def main(argv):
             sys.exit()
         if opt == "-d":
             working_directory = arg
-            print("Start in:", working_directory)
+            print("Start in: {}".format(working_directory))
         if opt == "-e":
             exclude_directories = arg.split(':')
         if opt == "-q":
             quick = True
         if opt == "-r":
-            print("Recursive")
             recursive = True
+        if opt == "-a":
+            cmake_automoc = True
 
     convert()
 
