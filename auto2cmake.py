@@ -24,7 +24,7 @@ recursive = False
 # whether the quick conversion generates a library or an executable
 quick_gen_lib = True
 # whether to use CMakes AUTOMOC or manually generate the moc files
-cmake_automoc = False
+cmake_automoc = True
 
 # all the options should be upcase? -u switch
 upcase_identifiers = 1
@@ -1380,7 +1380,7 @@ def convert_qmake_project(dir, fn):
     if srcs:
         cmake_file.write("\nset(${project}_SOURCES\n")
         for src in srcs:
-            cmake_file.write("\t" + src.strip() + "\n")
+            cmake_file.write("\t" + "${CMAKE_CURRENT_SOURCE_DIR}/" + src.strip() + "\n")
         cmake_file.write(")\n\n")
 
     # the headers. Split them up depending if they are moc headers or not
@@ -1406,18 +1406,18 @@ def convert_qmake_project(dir, fn):
                         for v in vv:
                             fn = v.strip()
                             if not moc_header(pjoin(working_directory, fn)):
-                                cmake_file.write("\t" + fn + "\n")
+                                cmake_file.write("\t" + "${CMAKE_CURRENT_SOURCE_DIR}/" + fn + "\n")
                             else:
                                 if not cmake_automoc:
                                     moc_headers.append(fn)
                                 else:
-                                    cmake_file.write("\t" + fn + "\n")
+                                    cmake_file.write("\t" + "${CMAKE_CURRENT_SOURCE_DIR}/" + fn + "\n")
 
                         break
                 if not found:
                     print("Error in qmake: var {} not found".format(vn))
             else:
-                cmake_file.write("\t" + header.strip() + "\n")
+                cmake_file.write("\t" + "${CMAKE_CURRENT_SOURCE_DIR}/" + header.strip() + "\n")
         cmake_file.write(")\n\n")
 
     if not cmake_automoc:
@@ -1425,20 +1425,45 @@ def convert_qmake_project(dir, fn):
 
         for mh in moc_headers:
             fn = mh.strip()
-            cmake_file.write("\t" + fn + "\n")
+            cmake_file.write("\t" + "${CMAKE_CURRENT_SOURCE_DIR}/" + fn + "\n")
 
         cmake_file.write(")\n")
 
-        cmake_file.write("qt_wrap_cpp(${project}_MOC_SOURCES ${${project}_MOC_HEADERS})\n")
+        cmake_file.write("qt_wrap_cpp( ${project}_MOC_SOURCES ${${project}_MOC_HEADERS} )\n")
     else:
         cmake_file.write("set(CMAKE_INCLUDE_CURRENT_DIR ON)\n")
         cmake_file.write("set(CMAKE_AUTOMOC ON)\n")
 
+    # find the resources
+    resources = []
+    for k in qvars.keys():
+        if k.startswith("RESOURCES"):
+            resources = qvars[k]
+            break
+
+    res_to_add = []
+    if resources:
+        cmake_file.write("\nset(CMAKE_AUTORCC ON)\n")
+        for resource in resources:
+            res_file = resource
+            res_file_name = os.path.basename(resource)
+            res_pieces = res_file_name.split('.')
+            res_name = res_pieces[0]
+            cmake_file.write("set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/%s PROPERTY AUTORCC_OPTIONS \"-name;%s\")" % (res_file, res_name))
+            res_to_add.append(res_file)
+
     # now depending on the type of the project add the required add_library or add_executable
     if qmake_proj_type.upper() == "APP":
-        cmake_file.write("add_executable( ${project} ${${project}_SOURCES}")
+        cmake_file.write("\n\nadd_executable( ${project} ${${project}_SOURCES} ")
     if qmake_proj_type.upper() == "LIB":
-        cmake_file.write("add_library( ${project} ${${project}_SOURCES}")
+        cmake_file.write("\n\nadd_library( ${project} ${${project}_SOURCES} ")
+
+    # now add the resources if any
+    if res_to_add:
+        for res in res_to_add:
+            cmake_file.write("${CMAKE_CURRENT_SOURCE_DIR}/%s " % (res))
+
+    cmake_file.write(")\n")
 
     cmake_file.close()
     exit(0)
