@@ -1,10 +1,18 @@
 #!/usr/bin/python3
+# SPDX-License-Identifier: MIT
 # script to convert an autotools project to more or less corresponding CMakeLists.txt structure
 # Interpret the linker flags
 # interpret the programs, generate add_executable
 # specify the target link dependencies
 # the gather the files mode
 # include directory generation based on parsing the file for #include
+
+# original script and source code under https://github.com/fritzone/autocmake
+# TODOs:
+# add VERSION, DESCRIPTION, HOMEPAGE_URL and LANGUAGES to project()
+# change "set(project" to use "project("
+# define CMake minimum requirement via command line option
+
 
 import sys, getopt, time, os, re
 from difflib import SequenceMatcher
@@ -1051,7 +1059,7 @@ def process_configure_ac(fname):
 ########################################################################################################################
 def generate_default_cmake(req_dir):
     projname = req_dir.split("/")[-1] + ")\n"
-    sources = "project("
+    sources = "set (project "
     sources += projname
     sources += ")\nset(${project}_SOURCES\n"
     files = glob.glob(req_dir + "/*.c*")
@@ -1066,10 +1074,6 @@ def generate_default_cmake(req_dir):
     r_cmake_file = open(req_dir + "/CMakeLists.txt", "w")
     r_cmake_file.write("cmake_minimum_required(VERSION 3.24)\n")
     r_cmake_file.write(sources)
-#    r_cmake_file.write(        VERSION 1.0.0.0)
-#    r_cmake_file.write(        DESCRIPTION "Your description here")
-#    r_cmake_file.write(        HOMEPAGE_URL "https://www.example.com")
-#    r_cmake_file.write(        LANGUAGES ")\n\n",)
     r_cmake_file.write("add_library(${project} STATIC ${${project}_SOURCES} )")
     r_cmake_file.close()
 
@@ -1122,9 +1126,9 @@ def create_cmakefile(path, cpps, headers, module):
 
     f.write("cmake_minimum_required(VERSION 3.24)\n")
     if full_module:
-        f.write("project(" + full_module + ")\n\n")
+        f.write("set (project " + full_module + ")\n\n")
     else:
-        f.write("project(" + module + ")\n\n")
+        f.write("set (project " + module + ")\n\n")
         full_module = module
 
     if cpps:
