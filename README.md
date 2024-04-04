@@ -1,7 +1,8 @@
-# autocmake
-Convert an autotools project to CMake
+# auto2cmake
+Convert an autotools project to CMake.
 
-I'm dealing with it as a private learning project to better understand CMake and Python.
+I'm dealing with it as a private learning project
+to better understand CMake and Python.
 
 A maybe unreachable goal (for my small abibilities) is
 to convert the LibreOffice build system from
