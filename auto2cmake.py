@@ -646,7 +646,11 @@ def process_makefile_am(file):
         extra_dir = ""
         for subdir in dirs_to_go_in.split():
             if not should_exclude(current_directory + "/" + subdir):
-                extra_dir += "\nadd_subdirectory( " + subdir + " )"
+                if "$(" in subdir:
+                    subdir = subdir.replace("$(", "${")
+                    extra_dir += "\nif( " + subdir + " )\n    add_subdirectory( " + subdir + " )\nendif()"
+                else:
+                    extra_dir += "\nadd_subdirectory( " + subdir + " )"
                 required_directories.append(current_directory + "/" + subdir)
         extra_content[current_directory] = extra_dir
 
