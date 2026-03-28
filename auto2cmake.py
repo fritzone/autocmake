@@ -1050,10 +1050,9 @@ def process_configure_ac(fname):
 # Generates default CMakeLists.txt in the given directory with content of source files
 ########################################################################################################################
 def generate_default_cmake(req_dir):
-    projname = req_dir.split("/")[-1] + ")\n"
-    sources = "set (project "
-    sources += projname
-    sources += ")\nset(${project}_SOURCES\n"
+    projname = req_dir.split("/")[-1]
+    sources = "set (project " + projname + ")\n"
+    sources += "set(${project}_SOURCES\n"
     files = glob.glob(req_dir + "/*.c*")
     for f in files:
         sources += "\t${CMAKE_CURRENT_SOURCE_DIR}/" + f.split("/")[-1] + "\n"
