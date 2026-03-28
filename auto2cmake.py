@@ -792,7 +792,7 @@ def process_libraries():
         while not done:
             for flag in to_work_with_flags:
                 if '$' in flag:
-                    m = re.search("\$\(.*\)", flag)
+                    m = re.search(r"\$\(.*\)", flag)
                     if m:
                         desired_var = remove_garbage(m.group(0))
                         if desired_var == "top_srcdir":
@@ -1610,12 +1610,13 @@ def convert():
 
     # Now see how many required directories did not got their own CMakeLists.txt
     # and generate in there manually, after removing the entries which are in the do not include list
-    final_list = [x for x in required_directories if not should_exclude(x)]
+    final_list = [x for x in required_directories if not should_exclude(x) and os.path.isdir(x)]
 
-    warning("WARNING!!! Creating default CMakeLists.txt in the directories below. Don't forget to fix these later")
-    for req_dir in final_list:
-        warning("Default CMakeLists.txt in:", req_dir)
-        generate_default_cmake(req_dir)
+    if final_list:
+        warning("WARNING!!! Creating default CMakeLists.txt in the directories below. Don't forget to fix these later")
+        for req_dir in final_list:
+            warning("Default CMakeLists.txt in:", req_dir)
+            generate_default_cmake(req_dir)
 
 ########################################################################################################################
 # Prints how to use the application
