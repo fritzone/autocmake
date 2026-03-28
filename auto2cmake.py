@@ -766,10 +766,10 @@ def process_libraries():
             current_content += "add_library ( " +library.referred_name + \
                                " " + library.type + " " +  "${${project}_SOURCES} )\n"
         else:
-            current_content += "add_executable(" + library.name + " ${${project}_SOURCES} )\n"
+            current_content += "add_executable(" + library.referred_name + " ${${project}_SOURCES} )\n"
 
         if not added_files:
-            warning("No source files found for ", library.name )
+            warning("No source files found for ", library.referred_name )
 
         # Now add the CPPFLAGS for the library
         # Firstly: parse out the $ stuff, and find the corresponding values for them
