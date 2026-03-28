@@ -1520,7 +1520,7 @@ def convert():
         if generate_comments:
             cmake_file.write("# Option to {0}\n".format(option[1].get_description()))
 
-        cmake_file.write("option( {0} \"{1}\" {2} )\n".format(option[1].get_name(), option[1].get_description(),
+        cmake_file.write("option( {0} \"{1}\" {2} )\n".format(option[1].get_name(), replace_quotes(option[1].get_description()),
                                                                option[1].get_status()))
         if more_newlines:
             cmake_file.write("\n")
