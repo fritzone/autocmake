@@ -646,7 +646,11 @@ def process_makefile_am(file):
         extra_dir = ""
         for subdir in dirs_to_go_in.split():
             if not should_exclude(current_directory + "/" + subdir):
-                extra_dir += "\nadd_subdirectory( " + subdir + " )"
+                if "$(" in subdir:
+                    subdir = subdir.replace("$(", "${")
+                    extra_dir += "\nif( " + subdir + " )\n    add_subdirectory( " + subdir + " )\nendif()"
+                else:
+                    extra_dir += "\nadd_subdirectory( " + subdir + " )"
                 required_directories.append(current_directory + "/" + subdir)
         extra_content[current_directory] = extra_dir
 
@@ -762,10 +766,10 @@ def process_libraries():
             current_content += "add_library ( " +library.referred_name + \
                                " " + library.type + " " +  "${${project}_SOURCES} )\n"
         else:
-            current_content += "add_executable(" + library.name + " ${${project}_SOURCES} )\n"
+            current_content += "add_executable(" + library.referred_name + " ${${project}_SOURCES} )\n"
 
         if not added_files:
-            warning("No source files found for ", library.name )
+            warning("No source files found for ", library.referred_name )
 
         # Now add the CPPFLAGS for the library
         # Firstly: parse out the $ stuff, and find the corresponding values for them
@@ -792,7 +796,7 @@ def process_libraries():
         while not done:
             for flag in to_work_with_flags:
                 if '$' in flag:
-                    m = re.search("\$\(.*\)", flag)
+                    m = re.search(r"\$\(.*\)", flag)
                     if m:
                         desired_var = remove_garbage(m.group(0))
                         if desired_var == "top_srcdir":
@@ -1050,10 +1054,9 @@ def process_configure_ac(fname):
 # Generates default CMakeLists.txt in the given directory with content of source files
 ########################################################################################################################
 def generate_default_cmake(req_dir):
-    projname = req_dir.split("/")[-1] + ")\n"
-    sources = "set (project "
-    sources += projname
-    sources += ")\nset(${project}_SOURCES\n"
+    projname = req_dir.split("/")[-1]
+    sources = "set (project " + projname + ")\n"
+    sources += "set(${project}_SOURCES\n"
     files = glob.glob(req_dir + "/*.c*")
     for f in files:
         sources += "\t${CMAKE_CURRENT_SOURCE_DIR}/" + f.split("/")[-1] + "\n"
@@ -1520,7 +1523,7 @@ def convert():
         if generate_comments:
             cmake_file.write("# Option to {0}\n".format(option[1].get_description()))
 
-        cmake_file.write("option( {0} \"{1}\" {2} )\n".format(option[1].get_name(), option[1].get_description(),
+        cmake_file.write("option( {0} \"{1}\" {2} )\n".format(option[1].get_name(), replace_quotes(option[1].get_description()),
                                                                option[1].get_status()))
         if more_newlines:
             cmake_file.write("\n")
@@ -1610,12 +1613,13 @@ def convert():
 
     # Now see how many required directories did not got their own CMakeLists.txt
     # and generate in there manually, after removing the entries which are in the do not include list
-    final_list = [x for x in required_directories if not should_exclude(x)]
+    final_list = [x for x in required_directories if not should_exclude(x) and os.path.isdir(x)]
 
-    warning("WARNING!!! Creating default CMakeLists.txt in the directories below. Don't forget to fix these later")
-    for req_dir in final_list:
-        warning("Default CMakeLists.txt in:", req_dir)
-        generate_default_cmake(req_dir)
+    if final_list:
+        warning("WARNING!!! Creating default CMakeLists.txt in the directories below. Don't forget to fix these later")
+        for req_dir in final_list:
+            warning("Default CMakeLists.txt in:", req_dir)
+            generate_default_cmake(req_dir)
 
 ########################################################################################################################
 # Prints how to use the application
