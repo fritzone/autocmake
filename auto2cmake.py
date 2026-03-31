@@ -1625,14 +1625,55 @@ def convert():
 # Prints how to use the application
 ########################################################################################################################
 def usage():
-    print("auto2cmake - a tool to convert autotools/qmake projects to cmake\n")
-    print("Usage: auto2cmake.py -d <working_directory> [-e <exclude_directories>] [-q] [-r] [-a] [-h]\n")
-    print("Specify exclude_directories: separated by ':'")
-    print("\nOther parameters:")
-    print(" - q = quick mode, just convert the entire directory into a CMake project file. Ignores both automake\n"
-          "       and qmake project files in the directory. Will try to identify the usage of QT in the cpp files")
-    print(" - r = used in quick mode, do a recursive directory walking")
-    print(" - a = used in quick mode/qmake conversion, use CMake automoc set to true instead of manual qt source wrapping")
+    print("auto2cmake - A pure python utility to convert Autotools & QMake projects to CMake\n")
+    
+    print("Usage: auto2cmake.py [OPTIONS] \n")
+    print("OPTIONS:\n")
+    
+    print(
+        "1.    [ -h | --help ]\n"
+        "\tDisplays this message.\n"
+    )
+
+    print(
+        "2.    [ -d | --directory=<dir> ]\n"
+        "\tBy default, auto2cmake uses the current working directory for execution.\n"
+        "\tBy passing this flag the working directory will be changed to reflect the provided directory.\n"
+    )
+
+    print(
+        "3.    [ -e | --exclude=<dir1> | --exclude=<dir1:dir2:etc> ]\n"
+        "\tBy passing this flag the provided directories will be skipped during execution.\n"
+    )
+
+    print(
+        "4.    [ -c | --disable-comments ]\n"
+        "\tBy default, auto2cmake generates comments in the newly created CMakeLists.txt\n"
+        "\tBy passing this flag, these comments will NOT be generated.\n"
+    )
+    
+    print(
+        "5.    [ -q | --quick ]\n"
+        "\tBy default auto2cmake disables Quick Mode.\n"
+        "\tBy passing this flag, Quick Mode will be enabled.\n" 
+        "\tQuick Mode:\n"
+        "\t    - Ignores both Automake and QMake project files.\n"
+        "\t    - Identify all usages of QT in the project's .cpp files.\n"
+    )
+
+    print(
+        "6.    [ -r | --recursive ]\n"
+        "\tBy default auto2cmake disables recursive directory walking.\n"
+        "\tBy passing this flag, recursion will be enabled.\n"
+    )
+    
+    print(
+        "7.    [ -a | --automoc ]\n"
+        "\tBy default auto2cmake uses CMake's Automoc generation.\n"
+        "\tBy passing this flag, CMake Automoc generation will be disabled.\n"
+        "\tThis flag also enables QT source wrapping.\n"
+        "\tIf Quick Mode is enabled, this flag won't change any behavior.\n"
+    )
 
 ########################################################################################################################
 # main
@@ -1644,28 +1685,49 @@ def main(argv):
     global quick
     global recursive
     global cmake_automoc
+    global generate_comments
 
     try:
-        opts, args = getopt.getopt(argv, "d:e:hqra", ["directory=,exclude="])
+        opts, args = getopt.getopt(
+            argv, 
+            shortopts="d:e:hqrac", 
+            longopts=["directory=", "exclude=", "help", "quick", "recursive" , "automoc", "disable-comments"]
+        )
+
     except getopt.GetoptError:
         usage()
         sys.exit(2)
 
     for opt, arg in opts:
-        if opt == '-h':
+        if opt == "-h" or opt == "--help":
             usage()
             sys.exit()
-        if opt == "-d":
+
+        # Swapped usage from if to elif for these 6 commands to avoid unnecessary checks.
+        # Handles both "-d <dir>" and "--directory=<dir>"
+        elif opt == "-d" or opt == "--directory":
             working_directory = os.path.expanduser(arg)
             print("Start in: {}".format(working_directory))
-        if opt == "-e":
+        
+        # Handles directory exclusion
+        elif opt == "-e" or opt == "--exclude":
             exclude_directories = arg.split(':')
-        if opt == "-q":
+        
+        # Enables Quick Mode
+        elif opt == "-q" or opt == "--quick":
             quick = True
-        if opt == "-r":
+        
+        # Enables Recursion
+        elif opt == "-r" or opt == "--recursive":
             recursive = True
-        if opt == "-a":
-            cmake_automoc = True
+        
+        # Disables CMake Automoc generation
+        elif opt == "-a" or opt == "--automoc":
+            cmake_automoc = False
+
+        # Disables optional comment generation.
+        elif opt == "-c" or opt == "--disable-comments":
+            generate_comments = 0
 
     convert()
 
