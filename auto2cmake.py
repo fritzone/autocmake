@@ -646,7 +646,7 @@ def process_makefile_am(file):
         extra_dir = ""
         for subdir in dirs_to_go_in.split():
             if not should_exclude(current_directory + "/" + subdir):
-                if "$(" in subdir:
+                if "$(" in subdir or "${" in subdir:
                     subdir = subdir.replace("$(", "${")
                     extra_dir += "\nif( " + subdir + " )\n    add_subdirectory( " + subdir + " )\nendif()"
                 else:
