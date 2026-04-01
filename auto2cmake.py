@@ -761,110 +761,128 @@ def process_libraries():
         if condition_required:
             current_content += "if (" + condition_required + ")\n"
 
-        if library.target_type == TargetType.LIBRARY:
-            # and now add some stuff to create a library out of the current stuff
-            current_content += "add_library ( " +library.referred_name + \
-                               " " + library.type + " " +  "${${project}_SOURCES} )\n"
-        else:
-            current_content += "add_executable(" + library.referred_name + " ${${project}_SOURCES} )\n"
+        # Previously, this only ensured len(added_files) > 0.
+        # There was no validation on the elements within the list.
+        # In multiple test cases, added_files contained only comments.
+        # In these cases, unexpected behavior was produced.
+        has_libraries = False
+        for file in added_files:
 
-        if not added_files:
-            warning("No source files found for ", library.referred_name )
+            lines = file.split('\n')
+            for raw_line in lines:
+                line = raw_line.strip()
 
-        # Now add the CPPFLAGS for the library
-        # Firstly: parse out the $ stuff, and find the corresponding values for them
-        strflags = library.compiler_flags
-        strflags = "".join(strflags)
-        flags = strflags.split()
+                if line and not line.startswith('#'):
+                    has_libraries = True
+                    break
+                
+            if has_libraries:
+                break
 
-        final_flags = ""
-        to_work_with_flags = []
-        for flag in flags:
-            if not '$' in flag and not '@' in flag:
-                final_flags += replace_quotes(flag) + " "
+        if has_libraries:
+            if library.target_type == TargetType.LIBRARY:
+                # and now add some stuff to create a library out of the current stuff
+                current_content += "add_library ( " +library.referred_name + \
+                                   " " + library.type + " " +  "${${project}_SOURCES} )\n"
             else:
-                to_work_with_flags.append(flag)
+                current_content += "add_executable(" + library.referred_name + " ${${project}_SOURCES} )\n"
 
-        if final_flags:
-            current_content += "set_target_properties( " + library.referred_name + "\n" \
-                               "    PROPERTIES COMPILE_FLAGS \"" \
-                               + final_flags + "\"\n)"
+            # Now add the CPPFLAGS for the library
+            # Firstly: parse out the $ stuff, and find the corresponding values for them
+            strflags = library.compiler_flags
+            strflags = "".join(strflags)
+            flags = strflags.split()
 
-
-        final_flags = []
-        done = False
-        while not done:
-            for flag in to_work_with_flags:
-                if '$' in flag:
-                    m = re.search(r"\$\(.*\)", flag)
-                    if m:
-                        desired_var = remove_garbage(m.group(0))
-                        if desired_var == "top_srcdir":
-                            to_work_with_flags.append("{CMAKE_SOURCE_DIR}")
-                        elif desired_var in config_ac_variables:
-                            for v in config_ac_variables[desired_var]["value"]:
-                                final_flags.append(v)
-
-                if flag in to_work_with_flags:
-                    to_work_with_flags.remove(flag)
-
-            # Are we done?
-            done = True
-            for flag in to_work_with_flags:
-                if '$' in flag:
-                    done = False
-
-        include_directories = []
-        # Now walk through the to_work_with_flags and see if we have any include directories stuff
-        for flag in final_flags:
-            flag = flag.replace("'", "")
-            flag = flag.strip()
-
-            flags = flag.split()
-
-            for newflag in flags:
-                if newflag.strip().startswith("-I"):
-                    include_directories.append(newflag.replace("$(top_srcdir)", "${CMAKE_SOURCE_DIR}"))
-
-        if include_directories:
-            current_content += "\ntarget_include_directories( " + library.referred_name + " PRIVATE"
-            for i_d in include_directories:
-                current_content += "\n    " + i_d.replace("-I", "")
-            current_content += "\n)\n"
-
-        # See if we need to put in any target_link_libraries command
-        if library.link_with_libs:
-
-            final_link_list = "\ntarget_link_libraries( " + library.referred_name
-
-            for link_name in library.link_with_libs:
-                target_link_lib = make_nice_library_name(link_name)
-                if target_link_lib.startswith("$"):
-                    # Find the just_variable for this target stuff, put it's value in here
-                    clean_tll_name = remove_garbage(target_link_lib)
-                    if clean_tll_name in library.just_variables:
-                        for more_link_names_list in library.just_variables[clean_tll_name]:
-                            for real_link in more_link_names_list:
-                                final_link_list += "\n    " + make_nice_library_name(real_link)
+            final_flags = ""
+            to_work_with_flags = []
+            for flag in flags:
+                if not '$' in flag and not '@' in flag:
+                    final_flags += replace_quotes(flag) + " "
                 else:
-                    if target_link_lib.startswith("@"):
-                        # coming from configure.ac options
-                        canname = target_link_lib.replace("@", '')
-                        if canname in config_ac_variables:
-                            libs = config_ac_variables[canname]["value"]
-                            for lib in "".join(libs).split():
-                                link_lib_name = make_nice_library_name(lib)
-                                if not link_lib_name.startswith("-L"):
-                                    final_link_list += "\n    " + link_lib_name
-                        else:
-                            final_link_list += "\n#    " + target_link_lib + " # <-- FIX THIS"
-                            warning ("WARNING: ", target_link_lib, " in ", library.directory + "/CMakeLists.txt",
-                                   " was not indentifiable, fix it manually")
-                    else:
-                        final_link_list += "\n    " + target_link_lib
-            final_link_list += "\n)\n"
+                    to_work_with_flags.append(flag)
 
-            current_content += final_link_list
+            if final_flags:
+                current_content += "set_target_properties( " + library.referred_name + "\n" \
+                                   "    PROPERTIES COMPILE_FLAGS \"" \
+                                   + final_flags + "\"\n)"
+
+
+            final_flags = []
+            done = False
+            while not done:
+                for flag in to_work_with_flags:
+                    if '$' in flag:
+                        m = re.search(r"\$\(.*\)", flag)
+                        if m:
+                            desired_var = remove_garbage(m.group(0))
+                            if desired_var == "top_srcdir":
+                                to_work_with_flags.append("{CMAKE_SOURCE_DIR}")
+                            elif desired_var in config_ac_variables:
+                                for v in config_ac_variables[desired_var]["value"]:
+                                    final_flags.append(v)
+
+                    if flag in to_work_with_flags:
+                        to_work_with_flags.remove(flag)
+
+                # Are we done?
+                done = True
+                for flag in to_work_with_flags:
+                    if '$' in flag:
+                        done = False
+
+            include_directories = []
+            # Now walk through the to_work_with_flags and see if we have any include directories stuff
+            for flag in final_flags:
+                flag = flag.replace("'", "")
+                flag = flag.strip()
+
+                flags = flag.split()
+
+                for newflag in flags:
+                    if newflag.strip().startswith("-I"):
+                        include_directories.append(newflag.replace("$(top_srcdir)", "${CMAKE_SOURCE_DIR}"))
+
+            if include_directories:
+                current_content += "\ntarget_include_directories( " + library.referred_name + " PRIVATE"
+                for i_d in include_directories:
+                    current_content += "\n    " + i_d.replace("-I", "")
+                current_content += "\n)\n"
+
+            # See if we need to put in any target_link_libraries command
+            if library.link_with_libs:
+
+                final_link_list = "\ntarget_link_libraries( " + library.referred_name
+
+                for link_name in library.link_with_libs:
+                    target_link_lib = make_nice_library_name(link_name)
+                    if target_link_lib.startswith("$"):
+                        # Find the just_variable for this target stuff, put it's value in here
+                        clean_tll_name = remove_garbage(target_link_lib)
+                        if clean_tll_name in library.just_variables:
+                            for more_link_names_list in library.just_variables[clean_tll_name]:
+                                for real_link in more_link_names_list:
+                                    final_link_list += "\n    " + make_nice_library_name(real_link)
+                    else:
+                        if target_link_lib.startswith("@"):
+                            # coming from configure.ac options
+                            canname = target_link_lib.replace("@", '')
+                            if canname in config_ac_variables:
+                                libs = config_ac_variables[canname]["value"]
+                                for lib in "".join(libs).split():
+                                    link_lib_name = make_nice_library_name(lib)
+                                    if not link_lib_name.startswith("-L"):
+                                        final_link_list += "\n    " + link_lib_name
+                            else:
+                                final_link_list += "\n#    " + target_link_lib + " # <-- FIX THIS"
+                                warning ("WARNING: ", target_link_lib, " in ", library.directory + "/CMakeLists.txt",
+                                       " was not indentifiable, fix it manually")
+                        else:
+                            final_link_list += "\n    " + target_link_lib
+                final_link_list += "\n)\n"
+
+                current_content += final_link_list
+        else:
+            warning("No source files found for ", library.referred_name, ". Skipping target generation." )
 
         if condition_required:
             current_content += "\nendif()\n"
