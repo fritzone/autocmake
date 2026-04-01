@@ -1086,7 +1086,10 @@ def generate_default_cmake(req_dir):
     projname = req_dir.split("/")[-1]
     sources = "set (project " + projname + ")\n"
     sources += "set(${project}_SOURCES\n"
+    has_code = False
     files = glob.glob(req_dir + "/*.c*")
+    if files:
+        has_code = True
     for f in files:
         sources += "\t${CMAKE_CURRENT_SOURCE_DIR}/" + f.split("/")[-1] + "\n"
     files = glob.glob(req_dir + "/*.h*")
@@ -1097,7 +1100,7 @@ def generate_default_cmake(req_dir):
 
     r_cmake_file = open(req_dir + "/CMakeLists.txt", "w")
     r_cmake_file.write("cmake_minimum_required(VERSION 2.8)\n")
-    if files:
+    if has_code:
         r_cmake_file.write(sources)
         r_cmake_file.write("add_library(${project} STATIC ${${project}_SOURCES} )")
     r_cmake_file.close()
