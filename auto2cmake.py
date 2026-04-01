@@ -264,6 +264,48 @@ def should_exclude(dire):
     return False
 
 ########################################################################################################################
+# Checks for an installation of CMake and attempts to resolve the version installed.
+########################################################################################################################
+def get_cmake_version():
+    print(f"Checking for a CMake installation please wait.")
+    
+    # Checking for the existence of "cmake" in the current system's path.
+    if not shutil.which("cmake"):
+        print("CMake installation not found. Please install CMake and try again.")
+        sys.exit()
+
+    result = None
+    
+    try:
+        result = subprocess.run(
+            ["cmake", "--version"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+    except Exception as e:
+        print("A CMake installation was found, however, an unexpected response was received.")
+        print(f"Response:\n{e.stderr}")
+
+
+    
+
+    # Checking for the expected output of:
+    # "cmake version X.X.X" or "cmake3 version X.X.X"
+    # Upon further research, "cmake" is sometimes a symlink to cmake3 on certain linux distributions.
+    # https://stackoverflow.com/questions/50989957/whats-the-difference-between-cmake-vs-cmake3
+    match = re.search(r"version\s+([\d.]+)", result.stdout)
+    
+    if not match:
+        print(
+            f"CMake detected, but the version string could not be parsed.\nOutput: {result.stdout}"
+        )
+        sys.exit()
+
+    return match.group(1)
+
+
+########################################################################################################################
 # removes the garbage characters from the given string
 ########################################################################################################################
 def remove_garbage(extra_value):
