@@ -255,7 +255,7 @@ def similar(a, b):
 
 
 ########################################################################################################################
-# Whether the directory is ecluded or not
+# Whether the directory is excluded or not
 ########################################################################################################################
 def should_exclude(dire):
     for exc_dir in exclude_directories:
@@ -1243,83 +1243,108 @@ def convert_sourcetree_to_cmake(start_path):
         return ""
 
     modules = []
+    
+    # Grabbing the files and subdirectories in the immediate viscinity instead of using walking recursively.abs
+    try:
+        source_tree_entries = os.listdir(start_path)
+    except OSError:
+        return ""
 
-    for path, dirs, files in os.walk(start_path):
+    cpp_files = []
+    header_files = []
+    resource_files = []
+    dirs = []
 
-        cpp_files = []
-        header_files = []
-        resource_files = []
+    for source_tree_entry in source_tree_entries:
+        full_path = pjoin(start_path, source_tree_entry)
+        if os.path.isfile(full_path):
 
-        temp_module = os.path.basename(path)  # directory of file
+            file_name, file_extension = os.path.splitext(source_tree_entry)
+            file_extension = file_extension.lower()
 
-        if ".git" in temp_module:
-            continue
+            # If this condition is met, the file is a Native C or C++ file.
+            if file_extension in cpp_extensions:
+                cpp_files.append(source_tree_entry)
+            
+            # If this condition is met, the file is a header file.
+            if file_extension in header_extensions:
+                header_files.append(source_tree_entry)
 
-        for filename in files:
-            full_name = os.path.join(path, filename)
+            # If this condition is met, the file is a Qt Resource Collection file.
+            if file_extension in qrc_extensions:
+                resource_files.append(source_tree_entry)
 
-            fn, ext = os.path.splitext(full_name)
-            ext = ext.lower()
-            if ext in cpp_extensions:
-                cpp_files.append(filename)
-            if ext in header_extensions:
-                header_files.append(filename)
-            if ext in qrc_extensions:
-                resource_files.append(filename)
+        # Managing subdirectories while ignoring the ".git" directory (if present)
+        elif os.path.isdir(full_path) and source_tree_entry != ".git":
+            dirs.append(source_tree_entry)
 
-        cpps_found, headers_found, mocs_found, used_module = create_cmakefile(path, cpp_files, header_files, temp_module)
+    temp_module = os.path.basename(start_path) # directory of file
+    cpps_found, headers_found, mocs_found, used_module = create_cmakefile(
+        start_path, 
+        cpp_files, 
+        header_files, 
+        temp_module
+    )
 
-        # Now fix the cmake in the current directory to include the directories
-        f = open(pjoin(path, "CMakeLists.txt"), "a")
+    # Now fix the cmake in the current directory to include the directories
+    f = open(pjoin(start_path, "CMakeLists.txt"), "a")
 
-        if recursive:
-            for cdir in dirs:
-                if ".git" in cdir:
-                    continue
-                f.write("add_subdirectory(" + cdir + ")\n")
-                sub_module = convert_sourcetree_to_cmake(pjoin(path, cdir))
-                if sub_module:
-                    modules.append(sub_module)
+    if recursive:
 
-        # See the cmake automoc status
-        if mocs_found:
-            if not cmake_automoc:
-                f.write("qt_wrap_cpp(${project}_MOC_SOURCES ${${project}_MOC_HEADERS})\n")
-            else:
-                f.write("set(CMAKE_INCLUDE_CURRENT_DIR ON)\n")
-                f.write("set(CMAKE_AUTOMOC ON)\n")
+        # Added a sort call, which is a personal preference.
+        # This can be rejected safely and replaced with the original call:
+        # for cdir in dirs: 
+        for cdir in sorted(dirs):
+            f.write("add_subdirectory(" + cdir + ")\n")
+            sub_module_path = pjoin(start_path, cdir)
+            sub_module = convert_sourcetree_to_cmake(sub_module_path)
+            
+            if sub_module:
+                modules.append(sub_module)
 
-        if cpps_found or headers_found or mocs_found:
-            f.write("add_library(${project} STATIC ")
+    # Checking the CMake AutoMoc status
+    if mocs_found:
+        
+        # If this condition is met, the user opted to use QT Source Wrapping.
+        if not cmake_automoc:
+            f.write("qt_wrap_cpp(${project}_MOC_SOURCES ${${project}_MOC_HEADERS})\n")
+        
+        # If the above condition is not met, the default behavior is used (CMake AutoMoc generation)
+        else:
+            f.write("set(CMAKE_INCLUDE_CURRENT_DIR ON)\n")
+            f.write("set(CMAKE_AUTOMOC ON)\n")
+
+    if cpps_found or headers_found or mocs_found:
+        f.write("add_library(${project} STATIC ")
+        
+        # If this condition is met, project sources are present.
         if cpps_found:
             f.write("${${project}_SOURCES} ")
+        
+        # If this condition is met, project headers are present.
         if headers_found:
             f.write("${${project}_HEADERS} ")
 
+        # If this condition is met, CMake Automoc(s) are present.
         if mocs_found:
+
             if not cmake_automoc:
                 f.write("${${project}_MOC_SOURCES} ")
             else:
                 f.write("${${project}_MOC_HEADERS}")
 
-        if cpps_found or headers_found or mocs_found:
-            f.write(")\n")
+        f.write(")\n")
 
-        if modules:
-            f = open(pjoin(start_path, "CMakeLists.txt"), "a")
+    if modules:
+        f.write("\ntarget_link_libraries (${project}\n")
+        
+        for module in modules:
+            f.write("    " + module + "\n")
 
-            f.write("\ntarget_link_libraries (${project}\n")
+        f.write(")\n")
 
-            for module in modules:
-                if ".git" in module:
-                    continue
-                f.write("    " + module + "\n")
-
-            f.write(")\n")
-
-        if not recursive:
-            exit(0)
-
+    # Added a missing call to close the file, ultimately preventing unexpected behavior.
+    f.close()
     return used_module
 
 ########################################################################################################################
