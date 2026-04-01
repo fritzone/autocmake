@@ -1066,12 +1066,12 @@ def generate_default_cmake(req_dir):
 
     sources += ")\n"
 
+    r_cmake_file = open(req_dir + "/CMakeLists.txt", "w")
+    r_cmake_file.write("cmake_minimum_required(VERSION 2.8)\n")
     if files:
-        r_cmake_file = open(req_dir + "/CMakeLists.txt", "w")
-        r_cmake_file.write("cmake_minimum_required(VERSION 2.8)\n")
         r_cmake_file.write(sources)
         r_cmake_file.write("add_library(${project} STATIC ${${project}_SOURCES} )")
-        r_cmake_file.close()
+    r_cmake_file.close()
 
 ########################################################################################################################
 # Adds extra content to the correct cmake file
