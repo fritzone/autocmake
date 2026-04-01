@@ -45,7 +45,7 @@ def run_test(repo_url: str, project_name, packages_to_check: List[str], test_num
         print(f"Error: {project_path} does not exist.")
         sys.exit(1)
 
-    print("Action 2/5: Cleaning up existing CMakeLists.txt in gnupg\n")
+    print(f"Action 2/5: Cleaning up existing CMakeLists.txt in {project_name}\n")
     for root, dirs, files in os.walk(project_path):
         for file in files:
             if file == "CMakeLists.txt":
