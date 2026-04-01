@@ -28,8 +28,8 @@ if __name__ == "__main__":
             "project_name": "cpython"
         },
         "result": run_test(
-            repo_url="https://github.com/gpg/gnupg", 
-            project_name="gnupg", 
+            repo_url="https://github.com/python/cpython", 
+            project_name="cpython", 
             packages_to_check=["git"],
             test_number=2
         )
