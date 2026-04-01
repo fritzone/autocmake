@@ -1596,7 +1596,7 @@ def convert():
         # now put out the extra defines of the option
         for extra in option[1].get_extra_defines():
             extra_value = remove_garbage(extra)
-            cmake_file.write("## !!! WARNING {0} Identified with some pattern matching magic.\n"
+            cmake_file.write("    message(\"## !!! WARNING {0} Identified with some pattern matching magic.\\n"
                              "## Remove if not relevant!\")\n".format(extra_value))
             cmake_file.write("    file(APPEND ${{CONFIG_H}} \"#define {0}\\n\\n\")\n".format(extra_value))
 
