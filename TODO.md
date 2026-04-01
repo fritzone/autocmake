@@ -1,5 +1,5 @@
 # Project TODO List
-## Last updated Wed Apr 01 20:34:40 2026 UTC
+## Last updated Wed Apr 01 21:45:39 2026 UTC
 
 ### Priority
 - High
@@ -15,7 +15,7 @@
 
 ### Dates
 - Dates are to be inserted using the ISO 8601 standard to avoid international confusion.
-- See: ISO 8601 Date Generator
+- See: [ISO 8601 Date Generator](https://developertoolskit.com/tools/iso-date-generator)
     - Howto:
         - Click "Use system time"
         - Click "Generate ISO 8601 Data" 
