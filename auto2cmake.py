@@ -618,9 +618,13 @@ def process_makefile_am(file):
     # now the entire file is parsed. See if we can make any replacement of values
     # from $(variable) to the actual definition of the variable
 
-    # firstly let's identify the conditional variables
+    # Identifying the conditional variables
     if defined_variables:
-        # go, through the defined variables see if we can replace any library.filelist element starting with $
+        
+        # Iterating through the defined variables.
+        # Searches for the presence of any library.filelist element starting with $.
+        # If any elements are found matching the criteria above, they are replaced.
+
         for var_name in defined_variables:
             for defined_lib_name in set(libraries_in_this_file):
                 found = False
@@ -630,12 +634,13 @@ def process_makefile_am(file):
                     inside_varname = "$(" + var_name + ")"
                     if file.find(inside_varname) != -1:
                         # Now, we have a list of #ifdef condition, append $source like stuff
-                        for cond, value in zip(defined_variables[var_name]["condition"], defined_variables[var_name]["value"]):
-                            cond_name = remove_garbage(cond)
-                            if cond_name in library.conditional_appends:
-                                library.conditional_appends[cond_name].append(' '.join(value))
+                        condition_iterable = zip(defined_variables[var_name]["condition"], defined_variables[var_name]["value"])
+                        for condition, value in condition_iterable:
+                            condition_name = remove_garbage(condition)
+                            if condition_name in library.conditional_appends:
+                                library.conditional_appends[condition_name].append(' '.join(value))
                             else:
-                                library.conditional_appends[cond_name] = value
+                                library.conditional_appends[condition_name] = value
                             found = True
                         break
                 if not found:
@@ -656,7 +661,7 @@ def process_makefile_am(file):
 
 
 ########################################################################################################################
-# processes all the libraries, creates the requested CMakeFile list ofthe application
+# processes all the libraries, creates the requested CMakeFile list of the application
 ########################################################################################################################
 def process_libraries():
     for library in libraries:
@@ -665,19 +670,20 @@ def process_libraries():
         if generate_comments:
             current_content += "# Generating the library " + library.name + "\n"
         current_content += "set(project \"" + library.referred_name + "\")\n\n"
-        current_content += "set(${project}, \"\")\n"
+        current_content += "set(${project} \"\")\n"
         condition_required = ""
 
-        # Here add the various conditional stuff for various files
-        for cond in library.conditional_appends:
-            conditional_append = library.conditional_appends[cond]
-            if cond:
-                # now find the condition from option, having define set to this "cond"
-                used_cond = False
+        # Iterating through the conditional appends for the current library in the iteration sequence
+        for condition in library.conditional_appends:
+            conditional_append = library.conditional_appends[condition]
+            if condition:
+                # If the condition is true, the options are iterated through.
+                # now find the condition from option, having define set to this "condition"
+                used_condition = False
                 for opt_name in options:
                     option = options[opt_name]
-                    if option.get_define() == cond:
-                        used_cond = True
+                    if option.get_define() == condition:
+                        used_condition = True
                         # and of course parse out the "conditional_append" from the simple variables of the library
                         # and generate cmake code which updates a list :)... also should be valid
                         current_content += "\nif(" + option.get_name() + ")\n"
@@ -695,17 +701,22 @@ def process_libraries():
                             current_content += "    list(APPEND ${project}_SOURCES" + unfolded_conditionals
                             added_files.append(unfolded_conditionals)
                         else:
-                            current_content += "    list(APPEND ${project}_SOURCES\n        " + "\n        ".join(conditional_append)
-                            added_files.append(conditional_append)
+                            file_list = "\n        ".join(conditional_append)
+                            current_content += "    list(APPEND ${project}_SOURCES\n        " + file_list
+                            added_files.append(file_list)
 
                         current_content += "\n    )\nendif()\n"
 
-                if not used_cond:
+                if not used_condition:
                     # We did not find this above, regardless generate an if() for it and a source of files
-                    condition_required = cond
-                    current_content += "\nif(" + cond + ")\n"
-                    current_content += "    list(APPEND ${project}_SOURCES\n        " + "\n        ".join(conditional_append)
+                    condition_required = condition
+                    current_content += "\nif(" + condition + ")\n"
+
+                    file_list = "\n        ".join(conditional_append)
+                    current_content += "    list(APPEND ${project}_SOURCES\n        " + file_list
                     current_content += "\n    )\nendif()\n"
+                    
+                    added_files.append(file_list)
 
             else:
                 add_regardless = []
@@ -1548,8 +1559,12 @@ def convert():
         if generate_comments:
             cmake_file.write("# Option to {0}\n".format(option[1].get_description()))
 
-        cmake_file.write("option( {0} \"{1}\" {2} )\n".format(option[1].get_name(), replace_quotes(option[1].get_description()),
-                                                               option[1].get_status()))
+        cmake_file.write(
+            "option( {0} \"{1}\" {2} )\n".format(
+                option[1].get_name(), 
+                replace_quotes(option[1].get_description()),
+                option[1].get_status())
+            )
         if more_newlines:
             cmake_file.write("\n")
 
@@ -1566,7 +1581,9 @@ def convert():
     for option in sorted_options:
         cmake_file.write("if( {0} )\n".format(option[1].get_name()))
         cmake_file.write("    message(\" {0} Enabled\")\n".format(option[1].get_name()))
-        cmake_file.write("    file(APPEND ${{CONFIG_H}} \"/* {0} */\\n\")\n".format(remove_garbage(option[1].get_define_description())))
+
+        sanitized_option_data = replace_quotes(remove_garbage(option[1].get_define_description()))
+        cmake_file.write("    file(APPEND ${{CONFIG_H}} \"/* {0} */\\n\")\n".format(sanitized_option_data))
 
         # some non-automata-conforming configure entries (the very verbose ones) do not have option name. Let's guess
         # them and prepend HAVE_ ... hopefully the programmers will fix them in their CMakeLists files
@@ -1594,7 +1611,8 @@ def convert():
         temp_define = temp_defines[temp_define_name]
         if temp_define["used"] == 0:
             extra_value = remove_garbage(temp_define["value"])
-            cmake_file.write("file(APPEND ${{CONFIG_H}} \"/* {0} */\\n\")\n".format(remove_garbage(temp_define["description"])))
+            extra_description = replace_quotes(remove_garbage(temp_define["description"]))
+            cmake_file.write("file(APPEND ${{CONFIG_H}} \"/* {0} */\\n\")\n".format(extra_description))
             cmake_file.write("file(APPEND ${{CONFIG_H}} \"#define {0} {1} \\n\\n \")\n".format(temp_define_name, replace_quotes(extra_value)))
 
     # since the config.h went into the ${CMAKE_BINARY_DIR} let's add that to the include directories
