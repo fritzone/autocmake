@@ -1521,6 +1521,9 @@ def convert():
     # let's not be very cmake hungry
     cmake_file.write("cmake_minimum_required(VERSION 2.8)\n")
 
+    project_working_directory = os.path.basename(os.path.normpath(working_directory))
+    cmake_file.write("project({0})\n".format(project_working_directory))
+
     sorted_options = sorted(options.items(), key=lambda x: x[1].get_name(), reverse=False)
     for option in sorted_options:
         option[1].finalize()
