@@ -6,10 +6,9 @@
 # the gather the files mode
 # include directory generation based on parsing the file for #include
 
-import sys, getopt, time, os, re
+import sys, getopt, time, os, re, glob
 from difflib import SequenceMatcher
 from enum import Enum
-import glob
 from os.path import join as pjoin
 
 ########################################################################################################################
