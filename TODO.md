@@ -29,3 +29,4 @@
 | T-004 | Refine the configuration file parsing logic | Low | Unassigned | TBD | N/A | N/A |
 | T-005 | Update minimum version pinning of CMake (3.X) | Low | Unassigned | TBD | N/A | N/A |
 | T-006 | Address the `# FIX THIS` comments | Low | Unassigned | TBD | N/A | N/A |
+| T-007 | Implement `get_cmake_version()` | Low | Unassigned | TBD | N/A | N/A |
