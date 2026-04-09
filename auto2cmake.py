@@ -236,9 +236,9 @@ def count_parentheses(line):
 ########################################################################################################################
 # Replaces the quotes with escaped quotes to be put in the CMakeLists.txt
 ########################################################################################################################
-def replace_quotes(a):
-    a = a.replace('\"', '\\"')
-    return a
+def replace_quotes(value):
+    value = value.replace('\"', '\\"')
+    return value
 
 
 def get_library_for_name(name):
