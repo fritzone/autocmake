@@ -1996,6 +1996,7 @@ def main(argv):
     global cmake_automoc
     global generate_comments
     global cmake_maximum_version
+    global cmake_minimum_version
     
     # Updating the CMake version info prior to handling arguments to ensure the values are properly set.
     update_version_info()
