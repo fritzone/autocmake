@@ -6,10 +6,9 @@
 # the gather the files mode
 # include directory generation based on parsing the file for #include
 
-import sys, getopt, time, os, re
+import sys, getopt, time, os, re, glob, subprocess, shutil
 from difflib import SequenceMatcher
 from enum import Enum
-import glob
 from os.path import join as pjoin
 
 ########################################################################################################################
@@ -256,13 +255,55 @@ def similar(a, b):
 
 
 ########################################################################################################################
-# Whether the directory is ecluded or not
+# Whether the directory is excluded or not
 ########################################################################################################################
 def should_exclude(dire):
     for exc_dir in exclude_directories:
         if dire.startswith(exc_dir):
             return True
     return False
+
+########################################################################################################################
+# Checks for an installation of CMake and attempts to resolve the version installed.
+########################################################################################################################
+def get_cmake_version():
+    print(f"Checking for a CMake installation please wait.")
+    
+    # Checking for the existence of "cmake" in the current system's path.
+    if not shutil.which("cmake"):
+        print("CMake installation not found. Please install CMake and try again.")
+        sys.exit()
+
+    result = None
+    
+    try:
+        result = subprocess.run(
+            ["cmake", "--version"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+    except Exception as e:
+        print("A CMake installation was found, however, an unexpected response was received.")
+        print(f"Response:\n{e.stderr}")
+
+
+    
+
+    # Checking for the expected output of:
+    # "cmake version X.X.X" or "cmake3 version X.X.X"
+    # Upon further research, "cmake" is sometimes a symlink to cmake3 on certain linux distributions.
+    # https://stackoverflow.com/questions/50989957/whats-the-difference-between-cmake-vs-cmake3
+    match = re.search(r"version\s+([\d.]+)", result.stdout)
+    
+    if not match:
+        print(
+            f"CMake detected, but the version string could not be parsed.\nOutput: {result.stdout}"
+        )
+        sys.exit()
+
+    return match.group(1)
+
 
 ########################################################################################################################
 # removes the garbage characters from the given string
@@ -618,9 +659,13 @@ def process_makefile_am(file):
     # now the entire file is parsed. See if we can make any replacement of values
     # from $(variable) to the actual definition of the variable
 
-    # firstly let's identify the conditional variables
+    # Identifying the conditional variables
     if defined_variables:
-        # go, through the defined variables see if we can replace any library.filelist element starting with $
+        
+        # Iterating through the defined variables.
+        # Searches for the presence of any library.filelist element starting with $.
+        # If any elements are found matching the criteria above, they are replaced.
+
         for var_name in defined_variables:
             for defined_lib_name in set(libraries_in_this_file):
                 found = False
@@ -630,12 +675,13 @@ def process_makefile_am(file):
                     inside_varname = "$(" + var_name + ")"
                     if file.find(inside_varname) != -1:
                         # Now, we have a list of #ifdef condition, append $source like stuff
-                        for cond, value in zip(defined_variables[var_name]["condition"], defined_variables[var_name]["value"]):
-                            cond_name = remove_garbage(cond)
-                            if cond_name in library.conditional_appends:
-                                library.conditional_appends[cond_name].append(' '.join(value))
+                        condition_iterable = zip(defined_variables[var_name]["condition"], defined_variables[var_name]["value"])
+                        for condition, value in condition_iterable:
+                            condition_name = remove_garbage(condition)
+                            if condition_name in library.conditional_appends:
+                                library.conditional_appends[condition_name].append(' '.join(value))
                             else:
-                                library.conditional_appends[cond_name] = value
+                                library.conditional_appends[condition_name] = value
                             found = True
                         break
                 if not found:
@@ -646,7 +692,7 @@ def process_makefile_am(file):
         extra_dir = ""
         for subdir in dirs_to_go_in.split():
             if not should_exclude(current_directory + "/" + subdir):
-                if "$(" in subdir:
+                if "$(" in subdir or "${" in subdir:
                     subdir = subdir.replace("$(", "${")
                     extra_dir += "\nif( " + subdir + " )\n    add_subdirectory( " + subdir + " )\nendif()"
                 else:
@@ -656,7 +702,7 @@ def process_makefile_am(file):
 
 
 ########################################################################################################################
-# processes all the libraries, creates the requested CMakeFile list ofthe application
+# processes all the libraries, creates the requested CMakeFile list of the application
 ########################################################################################################################
 def process_libraries():
     for library in libraries:
@@ -665,19 +711,20 @@ def process_libraries():
         if generate_comments:
             current_content += "# Generating the library " + library.name + "\n"
         current_content += "set(project \"" + library.referred_name + "\")\n\n"
-        current_content += "set(${project}, \"\")\n"
+        current_content += "set(${project} \"\")\n"
         condition_required = ""
 
-        # Here add the various conditional stuff for various files
-        for cond in library.conditional_appends:
-            conditional_append = library.conditional_appends[cond]
-            if cond:
-                # now find the condition from option, having define set to this "cond"
-                used_cond = False
+        # Iterating through the conditional appends for the current library in the iteration sequence
+        for condition in library.conditional_appends:
+            conditional_append = library.conditional_appends[condition]
+            if condition:
+                # If the condition is true, the options are iterated through.
+                # now find the condition from option, having define set to this "condition"
+                used_condition = False
                 for opt_name in options:
                     option = options[opt_name]
-                    if option.get_define() == cond:
-                        used_cond = True
+                    if option.get_define() == condition:
+                        used_condition = True
                         # and of course parse out the "conditional_append" from the simple variables of the library
                         # and generate cmake code which updates a list :)... also should be valid
                         current_content += "\nif(" + option.get_name() + ")\n"
@@ -695,17 +742,22 @@ def process_libraries():
                             current_content += "    list(APPEND ${project}_SOURCES" + unfolded_conditionals
                             added_files.append(unfolded_conditionals)
                         else:
-                            current_content += "    list(APPEND ${project}_SOURCES\n        " + "\n        ".join(conditional_append)
-                            added_files.append(conditional_append)
+                            file_list = "\n        ".join(conditional_append)
+                            current_content += "    list(APPEND ${project}_SOURCES\n        " + file_list
+                            added_files.append(file_list)
 
                         current_content += "\n    )\nendif()\n"
 
-                if not used_cond:
+                if not used_condition:
                     # We did not find this above, regardless generate an if() for it and a source of files
-                    condition_required = cond
-                    current_content += "\nif(" + cond + ")\n"
-                    current_content += "    list(APPEND ${project}_SOURCES\n        " + "\n        ".join(conditional_append)
+                    condition_required = condition
+                    current_content += "\nif(" + condition + ")\n"
+
+                    file_list = "\n        ".join(conditional_append)
+                    current_content += "    list(APPEND ${project}_SOURCES\n        " + file_list
                     current_content += "\n    )\nendif()\n"
+                    
+                    added_files.append(file_list)
 
             else:
                 add_regardless = []
@@ -761,110 +813,128 @@ def process_libraries():
         if condition_required:
             current_content += "if (" + condition_required + ")\n"
 
-        if library.target_type == TargetType.LIBRARY:
-            # and now add some stuff to create a library out of the current stuff
-            current_content += "add_library ( " +library.referred_name + \
-                               " " + library.type + " " +  "${${project}_SOURCES} )\n"
-        else:
-            current_content += "add_executable(" + library.referred_name + " ${${project}_SOURCES} )\n"
+        # Previously, this only ensured len(added_files) > 0.
+        # There was no validation on the elements within the list.
+        # In multiple test cases, added_files contained only comments.
+        # In these cases, unexpected behavior was produced.
+        has_libraries = False
+        for file in added_files:
 
-        if not added_files:
-            warning("No source files found for ", library.referred_name )
+            lines = file.split('\n')
+            for raw_line in lines:
+                line = raw_line.strip()
 
-        # Now add the CPPFLAGS for the library
-        # Firstly: parse out the $ stuff, and find the corresponding values for them
-        strflags = library.compiler_flags
-        strflags = "".join(strflags)
-        flags = strflags.split()
+                if line and not line.startswith('#'):
+                    has_libraries = True
+                    break
+                
+            if has_libraries:
+                break
 
-        final_flags = ""
-        to_work_with_flags = []
-        for flag in flags:
-            if not '$' in flag and not '@' in flag:
-                final_flags += replace_quotes(flag) + " "
+        if has_libraries:
+            if library.target_type == TargetType.LIBRARY:
+                # and now add some stuff to create a library out of the current stuff
+                current_content += "add_library ( " +library.referred_name + \
+                                   " " + library.type + " " +  "${${project}_SOURCES} )\n"
             else:
-                to_work_with_flags.append(flag)
+                current_content += "add_executable(" + library.referred_name + " ${${project}_SOURCES} )\n"
 
-        if final_flags:
-            current_content += "set_target_properties( " + library.referred_name + "\n" \
-                               "    PROPERTIES COMPILE_FLAGS \"" \
-                               + final_flags + "\"\n)"
+            # Now add the CPPFLAGS for the library
+            # Firstly: parse out the $ stuff, and find the corresponding values for them
+            strflags = library.compiler_flags
+            strflags = "".join(strflags)
+            flags = strflags.split()
 
-
-        final_flags = []
-        done = False
-        while not done:
-            for flag in to_work_with_flags:
-                if '$' in flag:
-                    m = re.search(r"\$\(.*\)", flag)
-                    if m:
-                        desired_var = remove_garbage(m.group(0))
-                        if desired_var == "top_srcdir":
-                            to_work_with_flags.append("{CMAKE_SOURCE_DIR}")
-                        elif desired_var in config_ac_variables:
-                            for v in config_ac_variables[desired_var]["value"]:
-                                final_flags.append(v)
-
-                if flag in to_work_with_flags:
-                    to_work_with_flags.remove(flag)
-
-            # Are we done?
-            done = True
-            for flag in to_work_with_flags:
-                if '$' in flag:
-                    done = False
-
-        include_directories = []
-        # Now walk through the to_work_with_flags and see if we have any include directories stuff
-        for flag in final_flags:
-            flag = flag.replace("'", "")
-            flag = flag.strip()
-
-            flags = flag.split()
-
-            for newflag in flags:
-                if newflag.strip().startswith("-I"):
-                    include_directories.append(newflag.replace("$(top_srcdir)", "${CMAKE_SOURCE_DIR}"))
-
-        if include_directories:
-            current_content += "\ntarget_include_directories( " + library.referred_name + " PRIVATE"
-            for i_d in include_directories:
-                current_content += "\n    " + i_d.replace("-I", "")
-            current_content += "\n)\n"
-
-        # See if we need to put in any target_link_libraries command
-        if library.link_with_libs:
-
-            final_link_list = "\ntarget_link_libraries( " + library.referred_name
-
-            for link_name in library.link_with_libs:
-                target_link_lib = make_nice_library_name(link_name)
-                if target_link_lib.startswith("$"):
-                    # Find the just_variable for this target stuff, put it's value in here
-                    clean_tll_name = remove_garbage(target_link_lib)
-                    if clean_tll_name in library.just_variables:
-                        for more_link_names_list in library.just_variables[clean_tll_name]:
-                            for real_link in more_link_names_list:
-                                final_link_list += "\n    " + make_nice_library_name(real_link)
+            final_flags = ""
+            to_work_with_flags = []
+            for flag in flags:
+                if not '$' in flag and not '@' in flag:
+                    final_flags += replace_quotes(flag) + " "
                 else:
-                    if target_link_lib.startswith("@"):
-                        # coming from configure.ac options
-                        canname = target_link_lib.replace("@", '')
-                        if canname in config_ac_variables:
-                            libs = config_ac_variables[canname]["value"]
-                            for lib in "".join(libs).split():
-                                link_lib_name = make_nice_library_name(lib)
-                                if not link_lib_name.startswith("-L"):
-                                    final_link_list += "\n    " + link_lib_name
-                        else:
-                            final_link_list += "\n#    " + target_link_lib + " # <-- FIX THIS"
-                            warning ("WARNING: ", target_link_lib, " in ", library.directory + "/CMakeLists.txt",
-                                   " was not indentifiable, fix it manually")
-                    else:
-                        final_link_list += "\n    " + target_link_lib
-            final_link_list += "\n)\n"
+                    to_work_with_flags.append(flag)
 
-            current_content += final_link_list
+            if final_flags:
+                current_content += "set_target_properties( " + library.referred_name + "\n" \
+                                   "    PROPERTIES COMPILE_FLAGS \"" \
+                                   + final_flags + "\"\n)"
+
+
+            final_flags = []
+            done = False
+            while not done:
+                for flag in to_work_with_flags:
+                    if '$' in flag:
+                        m = re.search(r"\$\(.*\)", flag)
+                        if m:
+                            desired_var = remove_garbage(m.group(0))
+                            if desired_var == "top_srcdir":
+                                to_work_with_flags.append("{CMAKE_SOURCE_DIR}")
+                            elif desired_var in config_ac_variables:
+                                for v in config_ac_variables[desired_var]["value"]:
+                                    final_flags.append(v)
+
+                    if flag in to_work_with_flags:
+                        to_work_with_flags.remove(flag)
+
+                # Are we done?
+                done = True
+                for flag in to_work_with_flags:
+                    if '$' in flag:
+                        done = False
+
+            include_directories = []
+            # Now walk through the to_work_with_flags and see if we have any include directories stuff
+            for flag in final_flags:
+                flag = flag.replace("'", "")
+                flag = flag.strip()
+
+                flags = flag.split()
+
+                for newflag in flags:
+                    if newflag.strip().startswith("-I"):
+                        include_directories.append(newflag.replace("$(top_srcdir)", "${CMAKE_SOURCE_DIR}"))
+
+            if include_directories:
+                current_content += "\ntarget_include_directories( " + library.referred_name + " PRIVATE"
+                for i_d in include_directories:
+                    current_content += "\n    " + i_d.replace("-I", "")
+                current_content += "\n)\n"
+
+            # See if we need to put in any target_link_libraries command
+            if library.link_with_libs:
+
+                final_link_list = "\ntarget_link_libraries( " + library.referred_name
+
+                for link_name in library.link_with_libs:
+                    target_link_lib = make_nice_library_name(link_name)
+                    if target_link_lib.startswith("$"):
+                        # Find the just_variable for this target stuff, put it's value in here
+                        clean_tll_name = remove_garbage(target_link_lib)
+                        if clean_tll_name in library.just_variables:
+                            for more_link_names_list in library.just_variables[clean_tll_name]:
+                                for real_link in more_link_names_list:
+                                    final_link_list += "\n    " + make_nice_library_name(real_link)
+                    else:
+                        if target_link_lib.startswith("@"):
+                            # coming from configure.ac options
+                            canname = target_link_lib.replace("@", '')
+                            if canname in config_ac_variables:
+                                libs = config_ac_variables[canname]["value"]
+                                for lib in "".join(libs).split():
+                                    link_lib_name = make_nice_library_name(lib)
+                                    if not link_lib_name.startswith("-L"):
+                                        final_link_list += "\n    " + link_lib_name
+                            else:
+                                final_link_list += "\n#    " + target_link_lib + " # <-- FIX THIS"
+                                warning ("WARNING: ", target_link_lib, " in ", library.directory + "/CMakeLists.txt",
+                                       " was not indentifiable, fix it manually")
+                        else:
+                            final_link_list += "\n    " + target_link_lib
+                final_link_list += "\n)\n"
+
+                current_content += final_link_list
+        else:
+            warning("No source files found for ", library.referred_name, ". Skipping target generation." )
 
         if condition_required:
             current_content += "\nendif()\n"
@@ -1057,7 +1127,10 @@ def generate_default_cmake(req_dir):
     projname = req_dir.split("/")[-1]
     sources = "set (project " + projname + ")\n"
     sources += "set(${project}_SOURCES\n"
+    has_code = False
     files = glob.glob(req_dir + "/*.c*")
+    if files:
+        has_code = True
     for f in files:
         sources += "\t${CMAKE_CURRENT_SOURCE_DIR}/" + f.split("/")[-1] + "\n"
     files = glob.glob(req_dir + "/*.h*")
@@ -1068,8 +1141,9 @@ def generate_default_cmake(req_dir):
 
     r_cmake_file = open(req_dir + "/CMakeLists.txt", "w")
     r_cmake_file.write("cmake_minimum_required(VERSION 2.8)\n")
-    r_cmake_file.write(sources)
-    r_cmake_file.write("add_library(${project} STATIC ${${project}_SOURCES} )")
+    if has_code:
+        r_cmake_file.write(sources)
+        r_cmake_file.write("add_library(${project} STATIC ${${project}_SOURCES} )")
     r_cmake_file.close()
 
 ########################################################################################################################
@@ -1169,83 +1243,108 @@ def convert_sourcetree_to_cmake(start_path):
         return ""
 
     modules = []
+    
+    # Grabbing the files and subdirectories in the immediate viscinity instead of using walking recursively.abs
+    try:
+        source_tree_entries = os.listdir(start_path)
+    except OSError:
+        return ""
 
-    for path, dirs, files in os.walk(start_path):
+    cpp_files = []
+    header_files = []
+    resource_files = []
+    dirs = []
 
-        cpp_files = []
-        header_files = []
-        resource_files = []
+    for source_tree_entry in source_tree_entries:
+        full_path = pjoin(start_path, source_tree_entry)
+        if os.path.isfile(full_path):
 
-        temp_module = os.path.basename(path)  # directory of file
+            file_name, file_extension = os.path.splitext(source_tree_entry)
+            file_extension = file_extension.lower()
 
-        if ".git" in temp_module:
-            continue
+            # If this condition is met, the file is a Native C or C++ file.
+            if file_extension in cpp_extensions:
+                cpp_files.append(source_tree_entry)
+            
+            # If this condition is met, the file is a header file.
+            if file_extension in header_extensions:
+                header_files.append(source_tree_entry)
 
-        for filename in files:
-            full_name = os.path.join(path, filename)
+            # If this condition is met, the file is a Qt Resource Collection file.
+            if file_extension in qrc_extensions:
+                resource_files.append(source_tree_entry)
 
-            fn, ext = os.path.splitext(full_name)
-            ext = ext.lower()
-            if ext in cpp_extensions:
-                cpp_files.append(filename)
-            if ext in header_extensions:
-                header_files.append(filename)
-            if ext in qrc_extensions:
-                resource_files.append(filename)
+        # Managing subdirectories while ignoring the ".git" directory (if present)
+        elif os.path.isdir(full_path) and source_tree_entry != ".git":
+            dirs.append(source_tree_entry)
 
-        cpps_found, headers_found, mocs_found, used_module = create_cmakefile(path, cpp_files, header_files, temp_module)
+    temp_module = os.path.basename(start_path) # directory of file
+    cpps_found, headers_found, mocs_found, used_module = create_cmakefile(
+        start_path, 
+        cpp_files, 
+        header_files, 
+        temp_module
+    )
 
-        # Now fix the cmake in the current directory to include the directories
-        f = open(pjoin(path, "CMakeLists.txt"), "a")
+    # Now fix the cmake in the current directory to include the directories
+    f = open(pjoin(start_path, "CMakeLists.txt"), "a")
 
-        if recursive:
-            for cdir in dirs:
-                if ".git" in cdir:
-                    continue
-                f.write("add_subdirectory(" + cdir + ")\n")
-                sub_module = convert_sourcetree_to_cmake(pjoin(path, cdir))
-                if sub_module:
-                    modules.append(sub_module)
+    if recursive:
 
-        # See the cmake automoc status
-        if mocs_found:
-            if not cmake_automoc:
-                f.write("qt_wrap_cpp(${project}_MOC_SOURCES ${${project}_MOC_HEADERS})\n")
-            else:
-                f.write("set(CMAKE_INCLUDE_CURRENT_DIR ON)\n")
-                f.write("set(CMAKE_AUTOMOC ON)\n")
+        # Added a sort call, which is a personal preference.
+        # This can be rejected safely and replaced with the original call:
+        # for cdir in dirs: 
+        for cdir in sorted(dirs):
+            f.write("add_subdirectory(" + cdir + ")\n")
+            sub_module_path = pjoin(start_path, cdir)
+            sub_module = convert_sourcetree_to_cmake(sub_module_path)
+            
+            if sub_module:
+                modules.append(sub_module)
 
-        if cpps_found or headers_found or mocs_found:
-            f.write("add_library(${project} STATIC ")
+    # Checking the CMake AutoMoc status
+    if mocs_found:
+        
+        # If this condition is met, the user opted to use QT Source Wrapping.
+        if not cmake_automoc:
+            f.write("qt_wrap_cpp(${project}_MOC_SOURCES ${${project}_MOC_HEADERS})\n")
+        
+        # If the above condition is not met, the default behavior is used (CMake AutoMoc generation)
+        else:
+            f.write("set(CMAKE_INCLUDE_CURRENT_DIR ON)\n")
+            f.write("set(CMAKE_AUTOMOC ON)\n")
+
+    if cpps_found or headers_found or mocs_found:
+        f.write("add_library(${project} STATIC ")
+        
+        # If this condition is met, project sources are present.
         if cpps_found:
             f.write("${${project}_SOURCES} ")
+        
+        # If this condition is met, project headers are present.
         if headers_found:
             f.write("${${project}_HEADERS} ")
 
+        # If this condition is met, CMake Automoc(s) are present.
         if mocs_found:
+
             if not cmake_automoc:
                 f.write("${${project}_MOC_SOURCES} ")
             else:
                 f.write("${${project}_MOC_HEADERS}")
 
-        if cpps_found or headers_found or mocs_found:
-            f.write(")\n")
+        f.write(")\n")
 
-        if modules:
-            f = open(pjoin(start_path, "CMakeLists.txt"), "a")
+    if modules:
+        f.write("\ntarget_link_libraries (${project}\n")
+        
+        for module in modules:
+            f.write("    " + module + "\n")
 
-            f.write("\ntarget_link_libraries (${project}\n")
+        f.write(")\n")
 
-            for module in modules:
-                if ".git" in module:
-                    continue
-                f.write("    " + module + "\n")
-
-            f.write(")\n")
-
-        if not recursive:
-            exit(0)
-
+    # Added a missing call to close the file, ultimately preventing unexpected behavior.
+    f.close()
     return used_module
 
 ########################################################################################################################
@@ -1358,8 +1457,11 @@ def convert_qmake_project(dir, fn):
     cmake_file = open(dir + "/CMakeLists.txt", "w")
     cmake_file.write("# Autogenerated by auto2cmake on {0}\n\n".format(time.strftime("%Y-%m-%d %H:%M:%S")))
     cmake_file.write("cmake_minimum_required(VERSION 2.8)\n\n")
-    cmake_file.write("set(project \"" + qmake_target_name + "\")\n")
+    
+    # Per https://cmake.org/cmake/help/latest/command/project.html#usage
+    # 'project(${project})' goes after 'cmake_minimum required' and before 'set(project "name")'
     cmake_file.write("project (${project})\n\n")
+    cmake_file.write("set(project \"" + qmake_target_name + "\")\n")
 
     # firstly let's fill in the variables if any was identified
 
@@ -1517,14 +1619,21 @@ def convert():
     # let's not be very cmake hungry
     cmake_file.write("cmake_minimum_required(VERSION 2.8)\n")
 
+    project_working_directory = os.path.basename(os.path.normpath(working_directory))
+    cmake_file.write("project({0})\n".format(project_working_directory))
+
     sorted_options = sorted(options.items(), key=lambda x: x[1].get_name(), reverse=False)
     for option in sorted_options:
         option[1].finalize()
         if generate_comments:
             cmake_file.write("# Option to {0}\n".format(option[1].get_description()))
 
-        cmake_file.write("option( {0} \"{1}\" {2} )\n".format(option[1].get_name(), replace_quotes(option[1].get_description()),
-                                                               option[1].get_status()))
+        cmake_file.write(
+            "option( {0} \"{1}\" {2} )\n".format(
+                option[1].get_name(), 
+                replace_quotes(option[1].get_description()),
+                option[1].get_status())
+            )
         if more_newlines:
             cmake_file.write("\n")
 
@@ -1541,7 +1650,9 @@ def convert():
     for option in sorted_options:
         cmake_file.write("if( {0} )\n".format(option[1].get_name()))
         cmake_file.write("    message(\" {0} Enabled\")\n".format(option[1].get_name()))
-        cmake_file.write("    file(APPEND ${{CONFIG_H}} \"/* {0} */\\n\")\n".format(remove_garbage(option[1].get_define_description())))
+
+        sanitized_option_data = replace_quotes(remove_garbage(option[1].get_define_description()))
+        cmake_file.write("    file(APPEND ${{CONFIG_H}} \"/* {0} */\\n\")\n".format(sanitized_option_data))
 
         # some non-automata-conforming configure entries (the very verbose ones) do not have option name. Let's guess
         # them and prepend HAVE_ ... hopefully the programmers will fix them in their CMakeLists files
@@ -1554,7 +1665,7 @@ def convert():
         # now put out the extra defines of the option
         for extra in option[1].get_extra_defines():
             extra_value = remove_garbage(extra)
-            cmake_file.write("## !!! WARNING {0} Identified with some pattern matching magic.\n"
+            cmake_file.write("    message(\"## !!! WARNING {0} Identified with some pattern matching magic.\\n"
                              "## Remove if not relevant!\")\n".format(extra_value))
             cmake_file.write("    file(APPEND ${{CONFIG_H}} \"#define {0}\\n\\n\")\n".format(extra_value))
 
@@ -1569,7 +1680,8 @@ def convert():
         temp_define = temp_defines[temp_define_name]
         if temp_define["used"] == 0:
             extra_value = remove_garbage(temp_define["value"])
-            cmake_file.write("file(APPEND ${{CONFIG_H}} \"/* {0} */\\n\")\n".format(remove_garbage(temp_define["description"])))
+            extra_description = replace_quotes(remove_garbage(temp_define["description"]))
+            cmake_file.write("file(APPEND ${{CONFIG_H}} \"/* {0} */\\n\")\n".format(extra_description))
             cmake_file.write("file(APPEND ${{CONFIG_H}} \"#define {0} {1} \\n\\n \")\n".format(temp_define_name, replace_quotes(extra_value)))
 
     # since the config.h went into the ${CMAKE_BINARY_DIR} let's add that to the include directories
@@ -1625,14 +1737,55 @@ def convert():
 # Prints how to use the application
 ########################################################################################################################
 def usage():
-    print("auto2cmake - a tool to convert autotools/qmake projects to cmake\n")
-    print("Usage: auto2cmake.py -d <working_directory> [-e <exclude_directories>] [-q] [-r] [-a] [-h]\n")
-    print("Specify exclude_directories: separated by ':'")
-    print("\nOther parameters:")
-    print(" - q = quick mode, just convert the entire directory into a CMake project file. Ignores both automake\n"
-          "       and qmake project files in the directory. Will try to identify the usage of QT in the cpp files")
-    print(" - r = used in quick mode, do a recursive directory walking")
-    print(" - a = used in quick mode/qmake conversion, use CMake automoc set to true instead of manual qt source wrapping")
+    print("auto2cmake - A pure python utility to convert Autotools & QMake projects to CMake\n")
+    
+    print("Usage: auto2cmake.py [OPTIONS] \n")
+    print("OPTIONS:\n")
+    
+    print(
+        "1.    [ -h | --help ]\n"
+        "\tDisplays this message.\n"
+    )
+
+    print(
+        "2.    [ -d | --directory=<dir> ]\n"
+        "\tBy default, auto2cmake uses the current working directory for execution.\n"
+        "\tBy passing this flag the working directory will be changed to reflect the provided directory.\n"
+    )
+
+    print(
+        "3.    [ -e | --exclude=<dir1> | --exclude=<dir1:dir2:etc> ]\n"
+        "\tBy passing this flag the provided directories will be skipped during execution.\n"
+    )
+
+    print(
+        "4.    [ -c | --disable-comments ]\n"
+        "\tBy default, auto2cmake generates comments in the newly created CMakeLists.txt\n"
+        "\tBy passing this flag, these comments will NOT be generated.\n"
+    )
+    
+    print(
+        "5.    [ -q | --quick ]\n"
+        "\tBy default auto2cmake disables Quick Mode.\n"
+        "\tBy passing this flag, Quick Mode will be enabled.\n" 
+        "\tQuick Mode:\n"
+        "\t    - Ignores both Automake and QMake project files.\n"
+        "\t    - Identify all usages of QT in the project's .cpp files.\n"
+    )
+
+    print(
+        "6.    [ -r | --recursive ]\n"
+        "\tBy default auto2cmake disables recursive directory walking.\n"
+        "\tBy passing this flag, recursion will be enabled.\n"
+    )
+    
+    print(
+        "7.    [ -a | --automoc ]\n"
+        "\tBy default auto2cmake uses CMake's Automoc generation.\n"
+        "\tBy passing this flag, CMake Automoc generation will be disabled.\n"
+        "\tThis flag also enables QT source wrapping.\n"
+        "\tIf Quick Mode is enabled, this flag won't change any behavior.\n"
+    )
 
 ########################################################################################################################
 # main
@@ -1644,28 +1797,49 @@ def main(argv):
     global quick
     global recursive
     global cmake_automoc
+    global generate_comments
 
     try:
-        opts, args = getopt.getopt(argv, "d:e:hqra", ["directory=,exclude="])
+        opts, args = getopt.getopt(
+            argv, 
+            shortopts="d:e:hqrac", 
+            longopts=["directory=", "exclude=", "help", "quick", "recursive" , "automoc", "disable-comments"]
+        )
+
     except getopt.GetoptError:
         usage()
         sys.exit(2)
 
     for opt, arg in opts:
-        if opt == '-h':
+        if opt == "-h" or opt == "--help":
             usage()
             sys.exit()
-        if opt == "-d":
+
+        # Swapped usage from if to elif for these 6 commands to avoid unnecessary checks.
+        # Handles both "-d <dir>" and "--directory=<dir>"
+        elif opt == "-d" or opt == "--directory":
             working_directory = os.path.expanduser(arg)
             print("Start in: {}".format(working_directory))
-        if opt == "-e":
+        
+        # Handles directory exclusion
+        elif opt == "-e" or opt == "--exclude":
             exclude_directories = arg.split(':')
-        if opt == "-q":
+        
+        # Enables Quick Mode
+        elif opt == "-q" or opt == "--quick":
             quick = True
-        if opt == "-r":
+        
+        # Enables Recursion
+        elif opt == "-r" or opt == "--recursive":
             recursive = True
-        if opt == "-a":
-            cmake_automoc = True
+        
+        # Disables CMake Automoc generation
+        elif opt == "-a" or opt == "--automoc":
+            cmake_automoc = False
+
+        # Disables optional comment generation.
+        elif opt == "-c" or opt == "--disable-comments":
+            generate_comments = 0
 
     convert()
 
