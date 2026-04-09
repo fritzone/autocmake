@@ -24,10 +24,23 @@ def run_command(command: str, cwd=cwd, packages_to_check=[]):
     return result
 
 def run_test(repo_url: str, project_name, packages_to_check: List[str], test_number: int) -> bool:
+
     print(f"Running Test #{test_number}\n")
 
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    project_root = os.path.join(repo_root, project_name)
     
+    if (os.path.exists(project_root)):
+        print(f"Deleting old test artifact at: {repo_root}")
+        try:
+            shutil.rmtree(project_root)
+            print("Deleted old test artifact")
+        except Exception as e:
+            print("Unable to remove old test artifacts.")
+            print("Please delete the directory manually.")
+            print(f"Error Log: {e}")
+
     print(f"Action 1/5: Cloning the repository from: {repo_url}\n")
 
     res = run_command(command=f"git clone {repo_url}", packages_to_check=["git"])
