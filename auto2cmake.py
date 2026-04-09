@@ -1,4 +1,7 @@
 #!/usr/bin/python3
+########################################################################################################################
+#                                               Application Description                                                #
+########################################################################################################################
 # script to convert an autotools project to more or less corresponding CMakeLists.txt structure
 # Interpret the linker flags
 # interpret the programs, generate add_executable
@@ -6,68 +9,27 @@
 # the gather the files mode
 # include directory generation based on parsing the file for #include
 
-import sys, getopt, time, os, re, glob, subprocess, shutil
+
+########################################################################################################################
+#                                                   Application Imports                                                #
+########################################################################################################################
+import sys, getopt, time, os, re, glob, shutil, subprocess
 from difflib import SequenceMatcher
 from enum import Enum
 from os.path import join as pjoin
+from urllib import request # urllib is chosen over requests to maintain portability
+from json import loads
+from typing import List, Optional # Used for explicit type declarations. (helpful for analyzing types without an IDE)
 
-########################################################################################################################
-#                 Global variables used by the application, specified on command line                                  #
-########################################################################################################################
 
-#
-# whether this is a quick conversion
-quick = False
-# whether the quick conversion is recursive or not
-recursive = False
-# whether the quick conversion generates a library or an executable
-quick_gen_lib = True
-# whether to use CMakes AUTOMOC or manually generate the moc files
-cmake_automoc = True
-
-# all the options should be upcase? -u switch
-upcase_identifiers = 1
-# should we generate some coments in the CMakeLists.txt? -c switch
-generate_comments = 1
-# generate more empty lines in the output file. -n switch
-more_newlines = 1
-# The working directory. Will be set by the -d argument to the script
-working_directory = "."
-# these directories will be excluded when searching for Makefile.am's (or any other processing). -e is the argument
-exclude_directories = []
-
-########################################################################################################################
-#                                       The application logic structures                                               #
-########################################################################################################################
-
-# the list of libraries that will be built. contains Library objects
-libraries = []
-# will contain all the options that were gathered from configure.ac in form of Option objects
-options = {}
-# will contain all the defines from the configure.ac
-temp_defines = {}
-# will contain the CMakeLists of the converted system. Key is the directory
-cmake_files = {}
-# will contain all the variables defined in configure.ac
-config_ac_variables = {}
-# will hold extra content for CMakeLists in specific directories
-extra_content = {}
-# The list of all the directories that will need a CMakeLists.txt in them
-required_directories = []
-
-########################################################################################################################
-# Constants
-########################################################################################################################
-cpp_extensions = [".c", ".cpp", ".cxx", ".c++", ".cc"]
-header_extensions = [".h", ".hpp", ".hxx", ".h++", ".hh"]
-qrc_extensions = [".qrc"]
 
 ########################################################################################################################
 #                                       Classes used by the application                                                #
 ########################################################################################################################
 
+
 ########################################################################################################################
-# represents a cmake file that will be generated at a later stage
+# Represents a CMake file that will be generated at a later stage.
 ########################################################################################################################
 class CMakeFile:
     def __init__(self, directory):
@@ -76,15 +38,58 @@ class CMakeFile:
         self.libraries = []                         # All the libraries that are created by this file
         self.extra_content = ""                     # Extra stuff such as add_subdriectory
 
+
 ########################################################################################################################
-# Whether a target is a library (noinst_LIBRARIES) or an application (bin_PROGRAMS)
+# Represents a CMake version object that will be utilized prior to, and during the generation stages.
+########################################################################################################################
+class CMakeVersion:
+    def __init__(self, version_string: str):
+        self.full_version: str = version_string
+        
+        self.major: int = None
+        self.minor: int = None
+        self.build: int = None
+
+        # Initializing the major, minor, and build versions
+        self.__parse__(version_string)
+
+
+    def __parse__(self, version_string: Optional[str]):
+        if version_string is None:
+            print("No CMake version string provided. Expected format: 'X.X' or 'X.X.X'")
+            exit(1)
+
+        version_parts: List[int] = [int(part) for part in version_string.split('.') if part.isdigit()]
+        number_of_parts: int = len(version_parts)
+
+        if number_of_parts in [0, 1] or number_of_parts > 3:
+            print("Unable to parse the provided CMake version string. Expected format: 'X.X' or 'X.X.X'")
+            exit(1)
+        
+        # Covering the major and minor version numbers
+        if number_of_parts >= 2:
+            self.major = version_parts[0]
+            self.minor = version_parts[1]
+        
+        # Since this class will not be called more than a handful of times, this additional check:
+        # - Covers the build version number
+        # - Uses a neglible amount of memory
+        # - Improves readability for future maintainers
+        if number_of_parts == 3:
+            self.build = version_parts[2]
+
+    def __str__(self):
+        return self.full_version
+
+########################################################################################################################
+# Whether a target is a Library (noinst_LIBRARIES) or an Application (bin_PROGRAMS)
 ########################################################################################################################
 class TargetType(Enum):
     LIBRARY = 1
     PROGRAM = 2
 
 ########################################################################################################################
-# represents a library that will be built by a specific make command
+# Represents a library that will be built by a specific make command.
 ########################################################################################################################
 class Library:
     def __init__(self, name, directory):
@@ -126,7 +131,7 @@ class Library:
 
 
 ########################################################################################################################
-# represents an option that will go in the CMakeLists.txt and also in the generated header if has a define
+# Represents an option that will go in the CMakeLists.txt and also in the generated header if a define is present.
 ########################################################################################################################
 class Option:
 
@@ -202,10 +207,229 @@ class Option:
 
 
 ########################################################################################################################
+#                 Global variables used by the application, specified on command line                                  #
+########################################################################################################################
+
+
+# Whether auto2cmake should utilize its "Quick Mode" for the next conversion.
+quick = False
+
+# Whether "Quick Mode" should utilize recursive directory walking for the next conversion.
+recursive = False
+
+# Whether "Quick Mode should generate a library or an executable. 
+# True => Library
+# False => Executable
+quick_gen_lib = True
+
+# Whether auto2cmake should use CMakes AUTOMOC.
+# If set to False, auto2cmake will use QT source wrapping to manually generate these moc files.
+cmake_automoc = True
+
+# Whether auto2cmake should use uppercase identifers for option objects.
+upcase_identifiers = 1
+
+# Whether the generated "CMakeLists.txt" files should contain optional comments.
+# This can be disabled by passing either "-c" or "--disable-comments"
+# It is recommended to leave this enabled.
+# 0 => Disable Comments
+# 1 => Enable Comments
+generate_comments = 1
+
+# Whether the generated "CMakeLists.txt" files should append more new than one newline char (\n) after each generated line. 
+# 0 => Don't add an extra new line character (\n) after each generated line.
+# 1 => Add an extra new line character (\n) after each generated line.
+more_newlines = 1
+
+# The working directory for the conversion operations attempted by auto2cmake. 
+# By default, auto2cmake will search the same directory the script is ran from.
+# This can be changed by passing either "-d <dir>" or "--directory=<dir>" 
+working_directory = "."
+
+# The directories auto2cmake should exclude when searching for Makefile.am(s) and during any other processing.
+# By default, auto2cmake does not exclude any directories.
+# This can be changed by passing any of the following:
+# "-e <dir>"
+# "--exclude=<dir>"
+# "--exclude=<dir1>:<dir2>:<dir3>"
+exclude_directories = []
+
+
+#######################################################################################################################
+#                                          CMake Version Info                                                         #
+#                               These values will be updated in update_version_info()                                 #
+#######################################################################################################################
+# The minimum version of CMake the converted project will support
+# The default version for conversion operations is CMake 2.8
+# This can be changed by passing either "-v <version>" or "--version=<version>"
+cmake_minimum_version: CMakeVersion = CMakeVersion("2.8")
+
+# The maximimum version of CMake currently released. 
+# Utilized in validate_cmake_version()
+cmake_maximum_version: Optional[CMakeVersion] = None
+
+# The currently installed version of CMake on the current machine.
+# Currently this has no impact on execution, despite being declared in update_version_info().
+# T-007 in TODO seeks to address this.
+cmake_installed_version: Optional[CMakeVersion] = None
+
+
+########################################################################################################################
+#                                       The application logic structures                                               #
+########################################################################################################################
+
+# the list of libraries that will be built. contains Library objects
+libraries = []
+# will contain all the options that were gathered from configure.ac in form of Option objects
+options = {}
+# will contain all the defines from the configure.ac
+temp_defines = {}
+# will contain the CMakeLists of the converted system. Key is the directory
+cmake_files = {}
+# will contain all the variables defined in configure.ac
+config_ac_variables = {}
+# will hold extra content for CMakeLists in specific directories
+extra_content = {}
+# The list of all the directories that will need a CMakeLists.txt in them
+required_directories = []
+
+########################################################################################################################
+# Constants
+########################################################################################################################
+cpp_extensions = [".c", ".cpp", ".cxx", ".c++", ".cc"]
+header_extensions = [".h", ".hpp", ".hxx", ".h++", ".hh"]
+qrc_extensions = [".qrc"]
+
+
+
+
+########################################################################################################################
 #                                       Helper functions used by the application                                       #
 ########################################################################################################################
 
 ########################################################################################################################
+# Checks for an installation of CMake and attempts to resolve the version installed.
+########################################################################################################################
+def get_installed_cmake_version():
+    print(f"Checking for a CMake installation, please wait.")
+    print()
+        
+    # Checking for the existence of "cmake" in the current system's path.
+    if not shutil.which("cmake"):
+        print("CMake installation not found. Please install CMake and try again.")
+        sys.exit()
+    
+
+    result = None
+    
+    try:
+        result = subprocess.run(
+            ["cmake", "--version"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+    except Exception as e:
+        print("A CMake installation was found, however, an unexpected response was received.")
+        print(f"Response:\n{e.stderr}")
+
+    # Checking for the expected output of:
+    # "cmake version X.X.X" or "cmake3 version X.X.X"
+    # Upon further research, "cmake" is sometimes a symlink to cmake3 on certain linux distributions.
+    # https://stackoverflow.com/questions/50989957/whats-the-difference-between-cmake-vs-cmake3
+    match = re.search(r"version\s+([\d.]+)", result.stdout)
+    
+    if not match:
+        print(
+            f"CMake detected, but the version string could not be parsed.\nOutput: {result.stdout}"
+        )
+        exit(1)
+
+
+    print(f"CMake {match.group(1)} is installed.")
+    return match.group(1)
+
+########################################################################################################################
+# Validates the value for the arguments "-v <VERSION>" and --version="<VERSION>"
+########################################################################################################################
+def validate_cmake_version(provided_version: str, latest_version: Optional[str]):
+    if latest_version is None:
+        print("Unable to resolve the latest version of CMake.")
+        return
+
+    try:
+        provided_version_obj: CMakeVersion = CMakeVersion(provided_version)
+        latest_version_obj: CMakeVersion = CMakeVersion(latest_version)
+        
+        # Handles versions that are less than CMake 2.0
+        if provided_version_obj.major < 2:
+            print(f"The specified version of CMake (v{provided_version_obj}) is not supported by auto2cmake.")
+            print("Please specify a version at or greater than CMake 2.8")
+            exit(1)
+
+        # Handles versions that are between CMake 2.0 and CMake 2.7
+        elif provided_version_obj.major == 2 and provided_version_obj.minor < 8:
+            print(f"The specified version of CMake (v{provided_version_obj}) is not supported by auto2cmake.")
+            print("Please specify a version at or greater than CMake 2.8")
+            exit(1)
+
+        # Handles versions that are not released (also handles incorrect input)
+        elif provided_version_obj.major > latest_version_obj.major:
+            print("The specified version of CMake is not currently released.")
+            print(f"The latest public release is v{latest_version_obj}")
+            exit(1)
+
+        else:
+            print(f"Validation complete, all processing will be done using CMake {provided_version_obj}")
+        
+
+    except Exception as e:
+        print(f"Error resolving the latest version of CMake.")
+        print(f"Type: {type(e)}")
+        print(f"Error: {e}")
+        print("Skipping version validation.")
+        return
+
+########################################################################################################################
+# Resolves the latest version of CMake from https://github.com/Kitware/CMake
+########################################################################################################################
+def get_latest_cmake_version():
+    url = "https://api.github.com/repos/Kitware/CMake/releases"
+    version = None
+    json_data = None
+
+    try:
+        with request.urlopen(url) as req:
+            str_data = req.read().decode('utf-8')
+            json_data = loads(str_data)
+            version = json_data[0]["tag_name"][1:]
+
+    except Exception as e:
+        print(e)
+
+    if not json_data:
+        print("Unable to resolve the latest version of CMake.")
+    
+    return CMakeVersion(version)
+
+########################################################################################################################
+# Updates the CMake version information used by the application.
+########################################################################################################################
+def update_version_info():
+    global cmake_maximum_version
+    global cmake_minimum_version
+    global cmake_installed_version
+
+    # the minimum version of CMake the converted project will support
+    cmake_minimum_version = "2.8"
+
+    # retrieving the latest version of CMake from their official Github repository
+    # the maximimum version of CMake currently released. validate_cmake_version
+    cmake_maximum_version = get_latest_cmake_version()
+
+    # the currently installed version of CMake on the System. Exits if CMake is not detected.
+    cmake_installed_version = get_installed_cmake_version()
+
 # prints a warning message
 ########################################################################################################################
 def warning(*s):
@@ -262,47 +486,6 @@ def should_exclude(dire):
         if dire.startswith(exc_dir):
             return True
     return False
-
-########################################################################################################################
-# Checks for an installation of CMake and attempts to resolve the version installed.
-########################################################################################################################
-def get_cmake_version():
-    print(f"Checking for a CMake installation please wait.")
-    
-    # Checking for the existence of "cmake" in the current system's path.
-    if not shutil.which("cmake"):
-        print("CMake installation not found. Please install CMake and try again.")
-        sys.exit()
-
-    result = None
-    
-    try:
-        result = subprocess.run(
-            ["cmake", "--version"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-    except Exception as e:
-        print("A CMake installation was found, however, an unexpected response was received.")
-        print(f"Response:\n{e.stderr}")
-
-
-    
-
-    # Checking for the expected output of:
-    # "cmake version X.X.X" or "cmake3 version X.X.X"
-    # Upon further research, "cmake" is sometimes a symlink to cmake3 on certain linux distributions.
-    # https://stackoverflow.com/questions/50989957/whats-the-difference-between-cmake-vs-cmake3
-    match = re.search(r"version\s+([\d.]+)", result.stdout)
-    
-    if not match:
-        print(
-            f"CMake detected, but the version string could not be parsed.\nOutput: {result.stdout}"
-        )
-        sys.exit()
-
-    return match.group(1)
 
 
 ########################################################################################################################
@@ -954,7 +1137,7 @@ def process_libraries():
 
 
 ########################################################################################################################
-# Makes a cmake internal library name from what comes in
+# Makes a CMake internal library name from what comes in
 ########################################################################################################################
 def make_nice_library_name(link_name):
     link_name = link_name.replace("'", "")
@@ -1140,7 +1323,7 @@ def generate_default_cmake(req_dir):
     sources += ")\n"
 
     r_cmake_file = open(req_dir + "/CMakeLists.txt", "w")
-    r_cmake_file.write("cmake_minimum_required(VERSION 2.8)\n")
+    r_cmake_file.write(f"cmake_minimum_required(VERSION {cmake_minimum_version})\n")
     if has_code:
         r_cmake_file.write(sources)
         r_cmake_file.write("add_library(${project} STATIC ${${project}_SOURCES} )")
@@ -1193,7 +1376,7 @@ def create_cmakefile(path, cpps, headers, module):
 
     f = open(pjoin(path,"CMakeLists.txt"), "w+")
 
-    f.write("cmake_minimum_required(VERSION 2.8)\n")
+    f.write(f"cmake_minimum_required(VERSION {cmake_minimum_version})\n")
     if full_module:
         f.write("set (project " + full_module + ")\n\n")
     else:
@@ -1456,7 +1639,7 @@ def convert_qmake_project(dir, fn):
 
     cmake_file = open(dir + "/CMakeLists.txt", "w")
     cmake_file.write("# Autogenerated by auto2cmake on {0}\n\n".format(time.strftime("%Y-%m-%d %H:%M:%S")))
-    cmake_file.write("cmake_minimum_required(VERSION 2.8)\n\n")
+    cmake_file.write(f"cmake_minimum_required(VERSION {cmake_minimum_version})\n\n")
     
     # Per https://cmake.org/cmake/help/latest/command/project.html#usage
     # 'project(${project})' goes after 'cmake_minimum required' and before 'set(project "name")'
@@ -1580,6 +1763,7 @@ def convert_qmake_project(dir, fn):
 def convert():
 
     global working_directory
+    global cmake_minimum_version
 
     # If this is a quick conversion mode:
     # 1. Just gather the cpp files in the current directory
@@ -1616,8 +1800,8 @@ def convert():
         cmake_file.write("# Autogenerated by auto2cmake on {0}\n\n# Options\n\n".
                          format(time.strftime("%Y-%m-%d %H:%M:%S")))
 
-    # let's not be very cmake hungry
-    cmake_file.write("cmake_minimum_required(VERSION 2.8)\n")
+    # Supports CMake 2.8+
+    cmake_file.write(f"cmake_minimum_required(VERSION {cmake_minimum_version})\n")
 
     project_working_directory = os.path.basename(os.path.normpath(working_directory))
     cmake_file.write("project({0})\n".format(project_working_directory))
@@ -1755,13 +1939,13 @@ def usage():
     )
 
     print(
-        "2.    [ -d | --directory=<dir> ]\n"
+        "2.    [ -d <dir> | --directory=<dir> ]\n"
         "\tBy default, auto2cmake uses the current working directory for execution.\n"
         "\tBy passing this flag the working directory will be changed to reflect the provided directory.\n"
     )
 
     print(
-        "3.    [ -e | --exclude=<dir1> | --exclude=<dir1:dir2:etc> ]\n"
+        "3.    [ -e <dir> | --exclude=<dir1> | --exclude=<dir1:dir2:etc> ]\n"
         "\tBy passing this flag the provided directories will be skipped during execution.\n"
     )
 
@@ -1794,6 +1978,12 @@ def usage():
         "\tIf Quick Mode is enabled, this flag won't change any behavior.\n"
     )
 
+    print(
+        "8.    [ -v <version> | --version=<version> ]\n"
+        "\tBy default auto2cmake pins minimum version support to CMake 2.8+\n"
+        "\tBy passing this flag, auto2cmake will use the specified version.\n"
+    )
+
 ########################################################################################################################
 # main
 ########################################################################################################################
@@ -1805,12 +1995,16 @@ def main(argv):
     global recursive
     global cmake_automoc
     global generate_comments
+    global cmake_maximum_version
+    
+    # Updating the CMake version info prior to handling arguments to ensure the values are properly set.
+    update_version_info()
 
     try:
         opts, args = getopt.getopt(
             argv, 
-            shortopts="d:e:hqrac", 
-            longopts=["directory=", "exclude=", "help", "quick", "recursive" , "automoc", "disable-comments"]
+            shortopts="d:e:v:hqrac", 
+            longopts=["directory=", "exclude=", "version=", "help", "quick", "recursive" , "automoc", "disable-comments"]
         )
 
     except getopt.GetoptError:
@@ -1847,6 +2041,14 @@ def main(argv):
         # Disables optional comment generation.
         elif opt == "-c" or opt == "--disable-comments":
             generate_comments = 0
+
+        elif opt == "-v" or opt == "--version":
+            print(f"CMake {cmake_maximum_version} is the latest.")
+            print(f"CMake {arg} specified via flag.")
+            print()
+            print("Validating input, please wait.")
+            validate_cmake_version(provided_version=arg, latest_version=cmake_maximum_version.full_version)
+            cmake_minimum_version = CMakeVersion(arg)
 
     convert()
 
