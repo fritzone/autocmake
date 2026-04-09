@@ -1623,17 +1623,24 @@ def convert():
     cmake_file.write("project({0})\n".format(project_working_directory))
 
     sorted_options = sorted(options.items(), key=lambda x: x[1].get_name(), reverse=False)
+    
     for option in sorted_options:
         option[1].finalize()
-        if generate_comments:
-            cmake_file.write("# Option to {0}\n".format(option[1].get_description()))
 
-        cmake_file.write(
-            "option( {0} \"{1}\" {2} )\n".format(
-                option[1].get_name(), 
-                replace_quotes(option[1].get_description()),
-                option[1].get_status())
-            )
+        # Dynamically sanitizing the option's name and description to remove unparsed Autotools tags.
+        clean_name = remove_garbage(option[1].get_name())
+        clean_desc = remove_garbage(option[1].get_description())
+
+        if generate_comments:
+            cmake_file.write("# Option to {0}\n".format(clean_desc))
+
+        # The previous implementation contained lackluster coverage, this newer implementation is significantly more robust!
+        cmake_file.write("option( {0} \"{1}\" {2} )\n".format(
+            clean_name,
+            replace_quotes(clean_desc),
+            option[1].get_status())
+        )
+
         if more_newlines:
             cmake_file.write("\n")
 
