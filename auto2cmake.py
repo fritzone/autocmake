@@ -242,9 +242,9 @@ def replace_quotes(a):
 
 
 def get_library_for_name(name):
-    for l in libraries:
-        if l.canonic_name == name:
-            return l
+    for library in libraries:
+        if library.canonic_name == name:
+            return library
     return None
 
 ########################################################################################################################
