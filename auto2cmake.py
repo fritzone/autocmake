@@ -417,11 +417,7 @@ def get_latest_cmake_version():
 ########################################################################################################################
 def update_version_info():
     global cmake_maximum_version
-    global cmake_minimum_version
     global cmake_installed_version
-
-    # the minimum version of CMake the converted project will support
-    cmake_minimum_version = "2.8"
 
     # retrieving the latest version of CMake from their official Github repository
     # the maximimum version of CMake currently released. validate_cmake_version
