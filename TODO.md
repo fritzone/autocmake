@@ -1,5 +1,5 @@
 # Project TODO List
-## Last updated 2026-04-09T19:49:40.333-04:00
+## Last updated 2026-04-10T21:51:42.081-04:00
 
 ### Priority
 - High
@@ -36,7 +36,7 @@
 | T-002 | Improve the variable expansion logic for `_SOURCES` | Low | Unassigned | TBD | N/A | N/A |
 | T-003 | Add support for QMake's `subdirs` project type | Low | Unassigned | TBD | N/A | N/A |
 | T-004 | Refine the configuration file parsing logic | Low | Unassigned | TBD | N/A | N/A |
-| T-005 | Update minimum version pinning of CMake (3.X) | Low | Unassigned | TBD | N/A | N/A |
+| T-005 | Update minimum version pinning of CMake (3.X) | Low | @fritzone | Assigned | 2026-04-10 | N/A |
 | T-006 | Address the `# FIX THIS` comments | Low | Unassigned | TBD | N/A | N/A |
-| T-007 | Implement `get_cmake_version()` | Low | @Static-Codes | TBD | 2026-04-08 | 2026-04-09 |
+| T-007 | Implement `get_cmake_version()` | Low | @Static-Codes | Pending Review | 2026-04-08 | 2026-04-09 |
 | T-008 | Rename `remove_garbage()` to `sanitize_string()` | TBD | N/A | N/A |
