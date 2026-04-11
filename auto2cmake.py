@@ -48,7 +48,9 @@ class CMakeVersion:
         
         self.major: int = None
         self.minor: int = None
-        self.build: int = None
+        
+        # Since the build version is not always specified, defaulting it to 0 will avoid AttributeError(s)
+        self.build: int = 0 
 
         # Initializing the major, minor, and build versions
         self.__parse__(version_string)
@@ -310,7 +312,7 @@ qrc_extensions = [".qrc"]
 ########################################################################################################################
 # Checks for an installation of CMake and attempts to resolve the version installed.
 ########################################################################################################################
-def get_installed_cmake_version():
+def get_installed_cmake_version() -> Optional[CMakeVersion]:
     print(f"Checking for a CMake installation, please wait.")
     print()
         
@@ -320,7 +322,7 @@ def get_installed_cmake_version():
         sys.exit()
     
 
-    result = None
+    match = None
     
     try:
         result = subprocess.run(
@@ -329,30 +331,70 @@ def get_installed_cmake_version():
             text=True,
             check=True
         )
+        # Checking for the expected output of:
+        # "cmake version X.X.X" or "cmake3 version X.X.X"
+        # Upon further research, "cmake" is sometimes a symlink to cmake3 on certain linux distributions.
+        # https://stackoverflow.com/questions/50989957/whats-the-difference-between-cmake-vs-cmake3
+        match = re.search(r"version\s+([\d.]+)", result.stdout)
+        
+        if not match:
+            print(
+                f"CMake detected, but the version string could not be parsed.\nOutput: {result.stdout}"
+            )
+            exit(1)
+
+
+        print(f"CMake {match.group(1)} is installed.")
+
     except Exception as e:
         print("A CMake installation was found, however, an unexpected response was received.")
         print(f"Response:\n{e.stderr}")
-
-    # Checking for the expected output of:
-    # "cmake version X.X.X" or "cmake3 version X.X.X"
-    # Upon further research, "cmake" is sometimes a symlink to cmake3 on certain linux distributions.
-    # https://stackoverflow.com/questions/50989957/whats-the-difference-between-cmake-vs-cmake3
-    match = re.search(r"version\s+([\d.]+)", result.stdout)
+        return None
     
-    if not match:
-        print(
-            f"CMake detected, but the version string could not be parsed.\nOutput: {result.stdout}"
-        )
-        exit(1)
+    return CMakeVersion(match.group(1))
+    
 
+########################################################################################################################
+# Performs a comparison operation on two CMakeVersion objects.
+# Returns True if lower_version_obj is greater than higher_version_obj when both objects are parsed.
+# Returns False otherwise.
+########################################################################################################################
+def cmake_version_is_invalid(lower_version_obj: CMakeVersion, higher_version_obj: CMakeVersion) -> bool:
+    # Handling the major and minor versions of both CMakeVersion objects passed as parameters.
+    if (
+        lower_version_obj.major is None or
+        higher_version_obj.major is None or
+        lower_version_obj.minor is None or
+        higher_version_obj.minor is None
+    ):
+        return True
 
-    print(f"CMake {match.group(1)} is installed.")
-    return match.group(1)
+    elif (
+        lower_version_obj.major > higher_version_obj.major or 
+
+        lower_version_obj.major >= higher_version_obj.major and
+        lower_version_obj.minor > higher_version_obj.minor
+    ):
+        return True
+
+    # Handling the build versions of both CMakeVersion objects passed as parameters.    
+    elif (
+        lower_version_obj.major >= higher_version_obj.major and
+        lower_version_obj.minor >= higher_version_obj.minor and
+        lower_version_obj.build > higher_version_obj.build
+    ):
+        return True
+
+    return False
+
 
 ########################################################################################################################
 # Validates the value for the arguments "-v <VERSION>" and --version="<VERSION>"
 ########################################################################################################################
 def validate_cmake_version(provided_version: str, latest_version: Optional[str]):
+    global cmake_installed_version
+    global cmake_minimum_version
+
     if latest_version is None:
         print("Unable to resolve the latest version of CMake.")
         return
@@ -360,31 +402,39 @@ def validate_cmake_version(provided_version: str, latest_version: Optional[str])
     try:
         provided_version_obj: CMakeVersion = CMakeVersion(provided_version)
         latest_version_obj: CMakeVersion = CMakeVersion(latest_version)
-        
-        # Handles versions that are less than CMake 2.0
-        if provided_version_obj.major < 2:
-            print(f"The specified version of CMake (v{provided_version_obj}) is not supported by auto2cmake.")
-            print("Please specify a version at or greater than CMake 2.8")
-            exit(1)
 
-        # Handles versions that are between CMake 2.0 and CMake 2.7
-        elif provided_version_obj.major == 2 and provided_version_obj.minor < 8:
+        # Handles versions that are less than the minimum supported
+        if (cmake_version_is_invalid(cmake_minimum_version, provided_version_obj)):
             print(f"The specified version of CMake (v{provided_version_obj}) is not supported by auto2cmake.")
-            print("Please specify a version at or greater than CMake 2.8")
+            print(f"Please specify a version at or greater than CMake {cmake_minimum_version}")
             exit(1)
 
         # Handles versions that are not released (also handles incorrect input)
-        elif provided_version_obj.major > latest_version_obj.major:
+        elif (cmake_version_is_invalid(provided_version_obj, latest_version_obj)):
             print("The specified version of CMake is not currently released.")
             print(f"The latest public release is v{latest_version_obj}")
             exit(1)
 
+        # General null check
+        elif (not provided_version_obj or not cmake_installed_version):
+            print("The following parameter has a NoneType in validate_cmake_version:")
+            print("\tprovided_version_obj" if not provided_version_obj else "\tcmake_installed_version")
+            exit(1)
+
+        # Currently a warning is provided when the installed version of CMake is older than version specified via flag.
+        elif (cmake_version_is_invalid(provided_version_obj, cmake_installed_version)):
+            print(f"The specified version of CMake (v{provided_version_obj}) is newer than the installed version on the current system.")
+            warning(
+                "This may cause unexpected behavior.\n"
+                f"It is recommended to specify {cmake_installed_version} instead of {provided_version_obj}"
+            )
+
         else:
             print(f"Validation complete, all processing will be done using CMake {provided_version_obj}")
-        
+            
 
     except Exception as e:
-        print(f"Error resolving the latest version of CMake.")
+        print(f"Error validating the provided version of CMake.")
         print(f"Type: {type(e)}")
         print(f"Error: {e}")
         print("Skipping version validation.")
@@ -419,11 +469,10 @@ def update_version_info():
     global cmake_maximum_version
     global cmake_installed_version
 
-    # retrieving the latest version of CMake from their official Github repository
-    # the maximimum version of CMake currently released. validate_cmake_version
+    # The maximimum version of CMake currently released.
     cmake_maximum_version = get_latest_cmake_version()
 
-    # the currently installed version of CMake on the System. Exits if CMake is not detected.
+    # The currently installed version of CMake on the System. Exits if CMake is not detected.
     cmake_installed_version = get_installed_cmake_version()
 
 # prints a warning message
@@ -1984,7 +2033,6 @@ def usage():
 # main
 ########################################################################################################################
 def main(argv):
-
     global working_directory
     global exclude_directories
     global quick
@@ -2017,7 +2065,7 @@ def main(argv):
         # Handles both "-d <dir>" and "--directory=<dir>"
         elif opt == "-d" or opt == "--directory":
             working_directory = os.path.expanduser(arg)
-            print("Start in: {}".format(working_directory))
+            print("Starting execution in directory: {}".format(working_directory))
         
         # Handles directory exclusion
         elif opt == "-e" or opt == "--exclude":
@@ -2041,9 +2089,10 @@ def main(argv):
 
         elif opt == "-v" or opt == "--version":
             print(f"CMake {cmake_maximum_version} is the latest.")
-            print(f"CMake {arg} specified via flag.")
+            print(f"CMake {arg} was specified via flag.")
             print()
-            print("Validating input, please wait.")
+            print(f"Checking if auto2cmake supports CMake {arg}, please wait.")
+            print()
             validate_cmake_version(provided_version=arg, latest_version=cmake_maximum_version.full_version)
             cmake_minimum_version = CMakeVersion(arg)
 
