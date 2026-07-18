@@ -21,13 +21,32 @@ This project aims to streamline this process, allowing you to get right back int
 * **Python 3.9+**
 * This is the only requirement currently!
 
+## Building Auto2CMake
+
+To compile Auto2CMake (`auto2cmake.py`) you can run the following commands:
+
+#### Windows
+```bash
+    cd path/to/autocmake
+    python bundle.py
+```
+
+#### Linux/MacOS
+```bash
+    cd path/to/autocmake
+    python3 bundle.py
+```
+
+
 ## Usage
+
+Once compiled, Auto2CMake offers two methods of usage.
 
 **Method 1**: Drag and Drop (Easier)
 - Originally Auto2CMake was developed to be dropped into the root directory of an Autotools/QMake project, alongside `autotools.ac` or `Makefile.am`.
 
     #### Windows
-    ```
+    ```bash
     python auto2cmake.py
     ```
 
@@ -40,7 +59,7 @@ This project aims to streamline this process, allowing you to get right back int
 - If you are dealing with a more complex workflow, or are trying to fully utilize Auto2CMake, then you will likely want to run the script with arguments.
     
     #### Windows
-    ```
+    ```bash
     python auto2cmake.py [OPTIONS]
     ```
 
