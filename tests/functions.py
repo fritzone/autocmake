@@ -43,7 +43,12 @@ def run_command(command: str, cwd=cwd, packages_to_check=[], command_should_fail
 
     return result
 
-def run_test(repo_url: str, project_name, packages_to_check: List[str], test_number: int, cmake_version: Optional[str], test_info: str = "Not Provided", test_should_fail: bool = False) -> bool:
+def run_test(repo_url: str, project_name, packages_to_check: List[str], test_number: int, cmake_version: Optional[str], test_info: str = "Not Provided", test_should_fail: bool = False, keep_test_artifacts: bool = False, skip_test: bool = False, recursive_scan: bool = False) -> bool:
+    
+    if skip_test:
+        print(f"Skipping Test #{test_number}")
+        return False
+    
     print(f"Running Test #{test_number}")
     print(f"Test Description: {test_info}\n")
 
@@ -61,7 +66,7 @@ def run_test(repo_url: str, project_name, packages_to_check: List[str], test_num
             print("Please delete the directory manually.")
             print(f"Error Log: {e}\n")
 
-    print(f"Action 1/5: Cloning the repository from: {repo_url}\n")
+    print(f"Action 1/6: Cloning the repository from: {repo_url}\n")
 
     res = run_command(command=f"git clone {repo_url}", packages_to_check=["git"])
 
@@ -78,7 +83,7 @@ def run_test(repo_url: str, project_name, packages_to_check: List[str], test_num
         print(f"Error: {project_path} does not exist.")
         sys.exit(1)
 
-    print(f"Action 2/5: Cleaning up existing CMakeLists.txt in {project_name}\n")
+    print(f"Action 2/6: Cleaning up existing CMakeLists.txt in {project_name}\n")
     for root, dirs, files in os.walk(project_path):
         for file in files:
             if file == "CMakeLists.txt":
@@ -90,9 +95,12 @@ def run_test(repo_url: str, project_name, packages_to_check: List[str], test_num
     
     # Using -v to specify a CMake version override.
     test_command += f" -v {cmake_version}" if cmake_version is not None else test_command
+    
+    # Using -r if recursive_scan is set to True.
+    test_command += f" -r" if recursive_scan else test_command
 
     
-    print(f"Action 3/5: Running auto2cmake.py for {project_name}")
+    print(f"Action 3/6: Running auto2cmake.py for {project_name}")
     print(f"Command: {test_command}\n")
     
     res = run_command(test_command, command_should_fail=test_should_fail)
@@ -109,7 +117,7 @@ def run_test(repo_url: str, project_name, packages_to_check: List[str], test_num
 
     cmake_version_string = "CMake" + f" {cmake_version}" if cmake_version is not None else ""
     
-    print(f"Action 4/5: Attempting to configure {project_name} using {cmake_version_string}\n")
+    print(f"Action 4/6: Attempting to configure {project_name} using {cmake_version_string}\n")
     build_dir = os.path.join(cwd, f"{project_name}_build_test")
     if os.path.exists(build_dir):
         shutil.rmtree(build_dir)
@@ -118,15 +126,36 @@ def run_test(repo_url: str, project_name, packages_to_check: List[str], test_num
     # Warning are expected, but aslong as the return code is 0, the conversion operation was successful.
     res = run_command(f"cmake -S {project_path} -B {build_dir}")
     
+    # Tracking the status of both the config and build phases
+    test_passed = False 
+
     if res.returncode == 0:
         print(f"SUCCESS: {project_name} configured with {cmake_version_string}!\n")
+        
+        build_cmd = f"cmake --build {build_dir}"
+        print(f"Action 5/6: Attempting to compile {project_name}\nCommand: {build_cmd}\n")
+        
+        # Attempting to compile the newly translate project.
+        # If this fails, then the translation done in processing.py needs to be refactored further.
+        build_res = run_command(build_cmd)
+        
+        if build_res.returncode == 0:
+            print(f"SUCCESS: {project_name} compiled successfully!\n")
+            test_passed = True
+        else:
+            print(f"FAILURE: Unable to compile {project_name}, exit code {build_res.returncode}.\n")
+            
     else:
         print(f"FAILURE: Unable to configure {project_name} using {cmake_version_string}.\n")
 
-    print("Action 5/5: Removing build artifacts associated with this test.\n")
-    shutil.rmtree(project_path)
-    shutil.rmtree(build_dir)
+    print("Action 6/6: Removing build artifacts associated with this test.\n")
+    
+    if not keep_test_artifacts:
+        shutil.rmtree(project_path)
+        if os.path.exists(build_dir):
+            shutil.rmtree(build_dir)
+    
     print("SUCCESS: Removed build artifacts associated with this test.\n\n")
-    return res.returncode == 0
+    return test_passed
     
     

@@ -1,3 +1,23 @@
+# Copyright (c) 2026 Ferenc Deak & Static Codes
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 # Instead of cramming all 2000+ lines of auto2cmake in a single file, this bundler serves as a good middleground.
 # The portability factor of the project remains untouched for end-users, and maintainers gain much needed organization!
 import os
@@ -20,7 +40,7 @@ OUTPUT = 'auto2cmake.py'
 # - ^\s* - Removes optional leading whitespace. 
 # - (import|'from') - Removes import keywords
 # - ({"|".join(INTERNAL_MODULES)}) - This will skip lines containing internal modules.
-# - The \b (word boundary) ensures we don't match 'constants_test' if we only want 'constants'
+# - \b - The word boundary ensures test modules are ignored; for example: 'constants_test' when 'constants' is desired.
 IMPORT_PATTERN = re.compile(
     fr'^\s*(import|from)\s+({"|".join(INTERNAL_MODULES)})\b', 
     re.IGNORECASE

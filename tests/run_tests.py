@@ -40,7 +40,9 @@ if __name__ == "__main__":
             packages_to_check=["git"], 
             test_number=1,
             test_info="Testing compatibility with gnupg using a supported legacy version of CMake (3.1)",
-            cmake_version="3.1"
+            cmake_version="3.1",
+            # skip_test=True,
+            recursive_scan=True
         )
     },
 
@@ -55,7 +57,10 @@ if __name__ == "__main__":
             packages_to_check=["git"],
             test_number=2,
             test_info="Testing compatibility with cpython, which caused issues in older releases of auto2cmake.",
-            cmake_version="3.28.3"
+            cmake_version="3.28.3",
+            # skip_test=True,
+            # keep_test_artifacts=True,
+            recursive_scan=True
         )
     },
 
@@ -71,7 +76,9 @@ if __name__ == "__main__":
             test_number=3,
             test_info="Testing the version parsing logic against an unsupported version of CMake (2.7)",
             cmake_version="2.7",
-            test_should_fail=True
+            test_should_fail=True,
+            # skip_test=True,
+            recursive_scan=True
         )
     },
 
@@ -87,7 +94,28 @@ if __name__ == "__main__":
             test_number=4,
             test_info="Testing the version parsing logic against an unreleased version of CMake (6.9)",
             cmake_version="6.9",
-            test_should_fail=True
+            test_should_fail=True,
+            # skip_test=True,
+            recursive_scan=True
+        )
+    },
+
+    {
+        "args": {
+            "repo_url": "https://github.com/strongswan/strongswan", 
+            "project_name": "strongswan"
+        },
+        "result": run_test(
+            repo_url="https://github.com/strongswan/strongswan", 
+            project_name="strongswan", 
+            packages_to_check=["git"],
+            test_number=5,
+            test_info="Testing another large project recommended by Autotools users.",
+            cmake_version="3.28.3",
+            test_should_fail=False,
+            # keep_test_artifacts=True,
+            # skip_test=True,
+            recursive_scan=True
         )
     },
 
